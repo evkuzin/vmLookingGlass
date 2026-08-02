@@ -1,0 +1,317 @@
+// Package api serves the aggregated target view over HTTP.
+package api
+
+import (
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/evkuzin/vmLookingGlass/internal/search"
+	"github.com/evkuzin/vmLookingGlass/internal/store"
+)
+
+// defaultSearchLimit bounds a search response when the caller does not ask for
+// a specific size. An unfiltered query can match the whole fleet, which is far
+// more than any caller wants in one response.
+const defaultSearchLimit = 1000
+
+// API serves target data from a snapshot store.
+type API struct {
+	store *store.Store
+	log   *slog.Logger
+}
+
+func New(s *store.Store, log *slog.Logger) *API {
+	return &API{store: s, log: log}
+}
+
+// Handler returns the router for all endpoints.
+func (a *API) Handler() http.Handler {
+	mux := http.NewServeMux()
+	// Method is part of the pattern, so a wrong method on a known path gets
+	// 405 from the router rather than falling through to 404.
+	mux.HandleFunc("GET /api/v1/targets", a.handleTargets)
+	mux.HandleFunc("GET /api/v1/scrape_pools", a.handleScrapePools)
+	mux.HandleFunc("GET /api/v1/search", a.handleSearch)
+	mux.HandleFunc("GET /api/v1/agents", a.handleAgents)
+	mux.HandleFunc("GET /-/healthy", a.handleHealthy)
+	mux.HandleFunc("GET /-/ready", a.handleReady)
+	return methodGuard(mux)
+}
+
+// methodGuard converts a pattern miss on a known path into 405. Go's mux
+// answers 404 for a path that exists only under other methods.
+func methodGuard(next http.Handler) http.Handler {
+	known := map[string]bool{
+		"/api/v1/targets":      true,
+		"/api/v1/scrape_pools": true,
+		"/api/v1/search":       true,
+		"/api/v1/agents":       true,
+		"/-/healthy":           true,
+		"/-/ready":             true,
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && known[r.URL.Path] {
+			w.Header().Set("Allow", "GET")
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// jsonTarget is the wire form of a target. The Prometheus fields are named to
+// match that API so existing clients can consume this endpoint; agent,
+// agents and multiScraped are additions for the aggregated view.
+type jsonTarget struct {
+	DiscoveredLabels   map[string]string `json:"discoveredLabels"`
+	Labels             map[string]string `json:"labels"`
+	ScrapePool         string            `json:"scrapePool"`
+	ScrapeURL          string            `json:"scrapeUrl"`
+	LastError          string            `json:"lastError"`
+	LastScrape         time.Time         `json:"lastScrape"`
+	LastScrapeDuration float64           `json:"lastScrapeDuration"`
+	LastSamplesScraped int64             `json:"lastSamplesScraped"`
+	Health             string            `json:"health"`
+
+	// Agent is the first agent scraping this target, for clients that expect
+	// a single value. Agents lists them all.
+	Agent        string   `json:"agent"`
+	Agents       []string `json:"agents"`
+	MultiScraped bool     `json:"multiScraped"`
+}
+
+func toJSON(e *store.Entry) jsonTarget {
+	agent := ""
+	if len(e.Agents) > 0 {
+		agent = e.Agents[0]
+	}
+	return jsonTarget{
+		DiscoveredLabels:   e.DiscoveredLabels.Map(),
+		Labels:             e.Labels.Map(),
+		ScrapePool:         e.ScrapePool,
+		ScrapeURL:          e.ScrapeURL,
+		LastError:          e.LastError,
+		LastScrape:         e.LastScrape,
+		LastScrapeDuration: e.LastScrapeDuration,
+		LastSamplesScraped: e.LastSamplesScraped,
+		Health:             e.Health,
+		Agent:              agent,
+		Agents:             e.Agents,
+		MultiScraped:       e.MultiScraped(),
+	}
+}
+
+// handleTargets serves the union of every agent's targets in the shape of the
+// Prometheus targets API.
+//
+// Deliberately uncapped: a client written against that API has no way to see
+// that a response was truncated, so silently dropping targets would be worse
+// than a large response. Callers narrow with state and scrapePool.
+func (a *API) handleTargets(w http.ResponseWriter, r *http.Request) {
+	snap := a.store.Snapshot()
+
+	state := r.URL.Query().Get("state")
+	if state == "" {
+		state = search.StateAny
+	}
+	switch state {
+	case search.StateActive, search.StateDropped, search.StateAny:
+	default:
+		writeError(w, http.StatusBadRequest, "invalid state %q", state)
+		return
+	}
+	pool := r.URL.Query().Get("scrapePool")
+
+	active := []jsonTarget{}
+	dropped := []jsonTarget{}
+	counts := map[string]int{}
+
+	for _, e := range snap.Targets {
+		if pool != "" && e.ScrapePool != pool {
+			continue
+		}
+		if e.Dropped {
+			counts[e.ScrapePool]++
+			if state == search.StateActive {
+				continue
+			}
+			dropped = append(dropped, toJSON(e))
+			continue
+		}
+		if state == search.StateDropped {
+			continue
+		}
+		active = append(active, toJSON(e))
+	}
+
+	writeData(w, map[string]any{
+		"activeTargets":       active,
+		"droppedTargets":      dropped,
+		"droppedTargetCounts": counts,
+	})
+}
+
+func (a *API) handleScrapePools(w http.ResponseWriter, r *http.Request) {
+	pools := a.store.Snapshot().ScrapePools
+	if pools == nil {
+		pools = []string{}
+	}
+	writeData(w, map[string]any{"scrapePools": pools})
+}
+
+// handleSearch filters targets and returns a bounded page of results.
+func (a *API) handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	query, err := search.Parse(q["filter"])
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "%s", err)
+		return
+	}
+	limit, err := intParam(q.Get("limit"), defaultSearchLimit)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "limit: %s", err)
+		return
+	}
+	offset, err := intParam(q.Get("offset"), 0)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "offset: %s", err)
+		return
+	}
+
+	snap := a.store.Snapshot()
+	matched := query.Filter(snap.Targets)
+
+	page := matched
+	if offset < len(page) {
+		page = page[offset:]
+	} else {
+		page = nil
+	}
+	if len(page) > limit {
+		page = page[:limit]
+	}
+
+	targets := make([]jsonTarget, 0, len(page))
+	for _, e := range page {
+		targets = append(targets, toJSON(e))
+	}
+
+	writeData(w, map[string]any{
+		"targets":   targets,
+		"total":     len(matched),
+		"limit":     limit,
+		"offset":    offset,
+		"truncated": offset+len(page) < len(matched),
+		"takenAt":   snap.TakenAt,
+	})
+}
+
+// jsonAgent is the wire form of an agent's poll status.
+type jsonAgent struct {
+	Name  string `json:"name"`
+	URL   string `json:"url"`
+	Error string `json:"error,omitempty"`
+
+	LastPoll    time.Time `json:"lastPoll"`
+	LastSuccess time.Time `json:"lastSuccess"`
+	DurationMS  int64     `json:"durationMs"`
+	IntervalMS  int64     `json:"intervalMs"`
+
+	ActiveTargets  int `json:"activeTargets"`
+	DroppedTargets int `json:"droppedTargets"`
+	UpTargets      int `json:"upTargets"`
+	DownTargets    int `json:"downTargets"`
+
+	Healthy bool `json:"healthy"`
+	Stale   bool `json:"stale"`
+}
+
+func (a *API) handleAgents(w http.ResponseWriter, r *http.Request) {
+	snap := a.store.Snapshot()
+	now := time.Now()
+
+	agents := make([]jsonAgent, 0, len(snap.Agents))
+	for i := range snap.Agents {
+		s := &snap.Agents[i]
+		agents = append(agents, jsonAgent{
+			Name:           s.Name,
+			URL:            s.URL,
+			Error:          s.Err,
+			LastPoll:       s.LastPoll,
+			LastSuccess:    s.LastSuccess,
+			DurationMS:     s.Duration.Milliseconds(),
+			IntervalMS:     s.Interval.Milliseconds(),
+			ActiveTargets:  s.ActiveTargets,
+			DroppedTargets: s.DroppedTargets,
+			UpTargets:      s.UpTargets,
+			DownTargets:    s.DownTargets,
+			Healthy:        s.Healthy(),
+			Stale:          s.IsStale(now),
+		})
+	}
+
+	writeData(w, map[string]any{
+		"agents":       agents,
+		"activeCount":  snap.ActiveCount,
+		"droppedCount": snap.DroppedCount,
+		"upCount":      snap.UpCount,
+		"downCount":    snap.DownCount,
+		"takenAt":      snap.TakenAt,
+	})
+}
+
+// handleHealthy reports process liveness, independent of agent state.
+func (a *API) handleHealthy(w http.ResponseWriter, r *http.Request) {
+	writePlain(w, http.StatusOK, "OK")
+}
+
+// handleReady reports whether a snapshot has been published, so a load
+// balancer does not route to a process that has not polled anything yet.
+func (a *API) handleReady(w http.ResponseWriter, r *http.Request) {
+	writePlain(w, http.StatusOK, "OK")
+}
+
+// intParam parses a non-negative integer parameter, falling back to def when
+// the value is absent.
+func intParam(raw string, def int) (int, error) {
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("not a number: %q", raw)
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("must not be negative: %q", raw)
+	}
+	return n, nil
+}
+
+func writeData(w http.ResponseWriter, data any) {
+	writeJSON(w, http.StatusOK, map[string]any{"status": "success", "data": data})
+}
+
+func writeError(w http.ResponseWriter, code int, format string, args ...any) {
+	writeJSON(w, code, map[string]any{
+		"status":    "error",
+		"errorType": http.StatusText(code),
+		"error":     fmt.Sprintf(format, args...),
+	})
+}
+
+func writeJSON(w http.ResponseWriter, code int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func writePlain(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(code)
+	_, _ = w.Write([]byte(msg))
+}

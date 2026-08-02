@@ -1,0 +1,41 @@
+# vmLookingGlass configuration.
+#
+# The file is watched and reloaded on change. Agents that appear start being
+# polled, agents that disappear stop and drop out of the view, and agents whose
+# settings are unchanged keep polling uninterrupted. A file that fails to parse
+# is logged and ignored, leaving the previous configuration in effect.
+#
+# This is a plain text file by design: generate it from whatever inventory
+# system owns the agent list and write it into place. Write to a temporary file
+# and rename over this one, so a reader never sees a half-written config.
+
+# HTTP address for the API and UI. The -listen flag overrides it.
+listen: :8880
+
+# Defaults for every agent. Both can be overridden per agent below.
+interval: 60s
+timeout: 30s
+
+agents:
+  # url accepts a bare host, host:port, or a full URL. A missing port
+  # defaults to 8429 and a missing scheme to http.
+  - url: vmagent01
+
+  # name defaults to the URL host. Set it when one host runs several agents,
+  # or when the display name should differ from the hostname.
+  - name: primary
+    url: vmagent02:8429
+
+  # Agents across a slow link can poll less often and wait longer.
+  - name: eu-west
+    url: https://eu-vmagent01.example:8429
+    interval: 5m
+    timeout: 90s
+
+  # labels are attached to every target this agent reports, which gives the
+  # UI something to group unrelated agents by.
+  - name: dc1-systems
+    url: vmagent03
+    labels:
+      region: us-east
+      env: production

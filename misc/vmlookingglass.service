@@ -1,0 +1,42 @@
+[Unit]
+Description=vmLookingGlass scrape target aggregator
+Documentation=https://github.com/evkuzin/vmLookingGlass
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vmlookingglass
+Group=vmlookingglass
+ExecStart=/usr/bin/vmlookingglass -config /etc/vmlookingglass/config.yml
+
+# The config is reloaded when the file changes, so a restart is only needed
+# for flag changes.
+Restart=always
+RestartSec=5s
+
+# Read-only aggregator: it needs the network and its config, nothing else.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+CapabilityBoundingSet=
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# The watcher tracks the directory rather than the file, so the whole
+# directory has to be readable.
+ReadOnlyPaths=/etc/vmlookingglass
+
+[Install]
+WantedBy=multi-user.target

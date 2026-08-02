@@ -1,0 +1,39 @@
+repos:
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-fmt
+        name: go fmt
+      - id: go-vet
+        name: go vet
+      - id: go-imports
+        name: goimports
+      - id: go-unit-tests
+        name: go test
+        args: ["-race", "-timeout=5m"]
+      - id: go-build
+        name: go build
+      - id: go-mod-tidy
+        name: go mod tidy
+
+  # Built from source by pre-commit, so the release has to compile under the
+  # toolchain in use: its bundled go/types must be able to parse that Go
+  # version's sources, and an older release fails on newer stdlib.
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v2.12.2
+    hooks:
+      - id: golangci-lint
+        name: golangci-lint
+        args:
+          - --timeout=5m
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: check-merge-conflict
+      - id: detect-private-key

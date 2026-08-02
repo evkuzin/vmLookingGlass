@@ -1,0 +1,108 @@
+version: 2
+
+run:
+  timeout: 5m
+  tests: true
+  allow-parallel-runners: true
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - staticcheck
+    - govet
+    - ineffassign
+    - unused
+
+    - bodyclose      # an unclosed response body leaks a connection per poll
+    - dupl
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - gosec
+    - misspell
+    - nakedret
+    - prealloc
+    - revive
+    - unconvert
+    - unparam
+    - whitespace
+
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - shadow
+        - fieldalignment
+    gocyclo:
+      min-complexity: 18
+    goconst:
+      min-len: 3
+      min-occurrences: 7
+    misspell:
+      locale: US
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+      disabled-checks:
+        - commentedOutCode
+        - whyNoLint
+        # A poll result crosses a call boundary once per agent per interval,
+        # so copy cost is irrelevant next to passing it plainly by value.
+        - hugeParam
+        - rangeValCopy
+        - unnamedResult
+    errcheck:
+      check-type-assertions: true
+      # An explicit `_ =` is the idiomatic way to say a failure is not
+      # actionable, so flagging it just pushes people to hide the call.
+      check-blank: false
+      # Writing to stdout or an already-buffered writer has no useful
+      # recovery, and checking every print call buries the real findings.
+      exclude-functions:
+        - (io.Writer).Write
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    gosec:
+      excludes:
+        - G304  # opening the operator-supplied config path is the whole job
+        - G404  # the only randomness is poll jitter, not a security boundary
+    revive:
+      rules:
+        - name: unexported-return
+          disabled: true
+        - name: unused-parameter
+          disabled: true
+
+  exclusions:
+    rules:
+      # Table-driven tests repeat literals and run long by nature.
+      - path: _test\.go
+        linters:
+          - gocyclo
+          - errcheck
+          - dupl
+          - gosec
+          - goconst
+          - gocognit
+          - prealloc
+          - unparam
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+  settings:
+    goimports:
+      local-prefixes: github.com/evkuzin/vmLookingGlass
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

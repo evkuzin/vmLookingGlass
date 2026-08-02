@@ -50,16 +50,30 @@ type Target struct {
 
 // Key returns the target's cross-agent identity.
 //
-// The scrape URL alone is not sufficient because one URL can back several
-// targets with different label sets, and the instance label alone is not
-// unique even within a single agent. Both are hashed, with each component
-// length-prefixed so that a separator occurring inside a value cannot forge
-// the same digest as a different field split.
+// For an active target the identity is its scrape URL plus its final labels.
+// The URL alone is not sufficient because one URL can back several targets
+// with different label sets, and the instance label alone is not unique even
+// within a single agent.
+//
+// A dropped target was relabeled away before it got either, so it is
+// identified by the labels it was discovered with instead. The two forms are
+// hashed under distinct prefixes so a dropped target cannot collide with an
+// active one. Each component is length-prefixed, so a separator occurring
+// inside a value cannot forge the digest of a different field split.
 func (t *Target) Key() TargetKey {
 	var h maphash.Hash
 	h.SetSeed(keySeed)
+
+	labels := t.Labels
+	if t.Dropped {
+		writeLenPrefixed(&h, "dropped")
+		labels = t.DiscoveredLabels
+	} else {
+		writeLenPrefixed(&h, "active")
+	}
+
 	writeLenPrefixed(&h, t.ScrapeURL)
-	for _, l := range t.Labels {
+	for _, l := range labels {
 		writeLenPrefixed(&h, l.Name)
 		writeLenPrefixed(&h, l.Value)
 	}

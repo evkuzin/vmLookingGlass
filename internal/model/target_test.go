@@ -75,6 +75,45 @@ func TestTargetKeyNoSeparatorCollision(t *testing.T) {
 	}
 }
 
+// Dropped targets have no scrape URL and no post-relabel labels, so identity
+// has to fall back to the discovered labels or every dropped target in the
+// fleet would collapse into one.
+func TestDroppedTargetKeyUsesDiscoveredLabels(t *testing.T) {
+	in := NewInterner()
+	mk := func(addr string) Target {
+		return Target{
+			Dropped:          true,
+			DiscoveredLabels: in.Labels(map[string]string{"__address__": addr, "job": "pool-9"}),
+		}
+	}
+	a, b := mk("hostA:9119"), mk("hostB:9119")
+
+	if a.Key() == b.Key() {
+		t.Error("dropped targets with different addresses share a key")
+	}
+	same := mk("hostA:9119")
+	if a.Key() != same.Key() {
+		t.Error("identical dropped targets produced different keys")
+	}
+}
+
+// A dropped target must not collide with an active one that happens to have
+// no labels yet.
+func TestDroppedAndActiveKeysDiffer(t *testing.T) {
+	in := NewInterner()
+	dropped := Target{
+		Dropped:          true,
+		DiscoveredLabels: in.Labels(map[string]string{"__address__": "h:9100"}),
+	}
+	active := Target{
+		ScrapeURL:        "http://h:9100/metrics",
+		DiscoveredLabels: in.Labels(map[string]string{"__address__": "h:9100"}),
+	}
+	if dropped.Key() == active.Key() {
+		t.Error("a dropped target collided with an active one")
+	}
+}
+
 func TestTargetHealthHelpers(t *testing.T) {
 	tests := []struct {
 		health string

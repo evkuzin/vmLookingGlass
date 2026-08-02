@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -71,6 +72,7 @@ func TestApplySingleAgent(t *testing.T) {
 		target(in, "a1", "http://h1/metrics", map[string]string{"instance": "h1", "job": "node"}),
 		target(in, "a1", "http://h2/metrics", map[string]string{"instance": "h2", "job": "node"}),
 	))
+	s.Flush()
 
 	snap := s.Snapshot()
 	if len(snap.Targets) != 2 {
@@ -99,6 +101,7 @@ func TestTargetScrapedByTwoAgents(t *testing.T) {
 	s := New()
 	s.Apply(result("a1", target(in, "a1", url, labels)))
 	s.Apply(result("a2", target(in, "a2", url, labels)))
+	s.Flush()
 
 	snap := s.Snapshot()
 	if len(snap.Targets) != 1 {
@@ -127,6 +130,7 @@ func TestRepeatedPollDoesNotDuplicateAgent(t *testing.T) {
 	for range 3 {
 		s.Apply(result("a1", target(in, "a1", url, labels)))
 	}
+	s.Flush()
 
 	tgt := s.Snapshot().Targets[0]
 	if len(tgt.Agents) != 1 {
@@ -150,6 +154,7 @@ func TestDuplicateTargetWithinOneAgent(t *testing.T) {
 	res := result("a1", dup, dup)
 	res.Result.Dropped = []model.Target{dup}
 	s.Apply(res)
+	s.Flush()
 
 	snap := s.Snapshot()
 	if len(snap.Targets) != 1 {
@@ -176,11 +181,13 @@ func TestTargetOrderStableAcrossRebuilds(t *testing.T) {
 		targets = append(targets, target(in, "a1", url, map[string]string{"instance": url}))
 	}
 	s.Apply(result("a1", targets...))
+	s.Flush()
 
 	first := urls(s.Snapshot())
 	for range 5 {
 		// Rebuild without changing anything an agent reports.
 		s.Apply(result("a1", targets...))
+		s.Flush()
 		if got := urls(s.Snapshot()); !slices.Equal(got, first) {
 			t.Fatalf("target order changed between rebuilds:\n %v\n %v", first, got)
 		}
@@ -210,6 +217,8 @@ func TestMergeOrderIndependent(t *testing.T) {
 	reverse := New()
 	reverse.Apply(result("a2", target(in, "a2", url, labels)))
 	reverse.Apply(result("a1", target(in, "a1", url, labels)))
+	forward.Flush()
+	reverse.Flush()
 
 	f, r := forward.Snapshot().Targets[0], reverse.Snapshot().Targets[0]
 	if len(f.Agents) != len(r.Agents) {
@@ -235,6 +244,7 @@ func TestApplyReplacesAgentTargets(t *testing.T) {
 		target(in, "a1", "http://h1/metrics", map[string]string{"instance": "h1"}),
 	))
 
+	s.Flush()
 	snap := s.Snapshot()
 	if len(snap.Targets) != 1 {
 		t.Errorf("targets = %d, want 1 after the target disappeared", len(snap.Targets))
@@ -247,6 +257,7 @@ func TestFailedPollKeepsLastGoodData(t *testing.T) {
 	s := New()
 	s.Apply(result("a1", target(in, "a1", "http://h1/metrics", map[string]string{"instance": "h1"})))
 	s.Apply(failure("a1", "connection refused"))
+	s.Flush()
 
 	snap := s.Snapshot()
 	if len(snap.Targets) != 1 {
@@ -271,6 +282,7 @@ func TestFailureIsolatedToOneAgent(t *testing.T) {
 	s.Apply(result("a1", target(in, "a1", "http://h1/metrics", map[string]string{"instance": "h1"})))
 	s.Apply(result("a2", target(in, "a2", "http://h2/metrics", map[string]string{"instance": "h2"})))
 	s.Apply(failure("a1", "boom"))
+	s.Flush()
 
 	snap := s.Snapshot()
 	if len(snap.Targets) != 2 {
@@ -291,6 +303,7 @@ func TestScrapePoolsSortedAndUnique(t *testing.T) {
 	s := New()
 	s.Apply(result("a1", mk("a1", "zebra", "http://h1/m"), mk("a1", "alpha", "http://h2/m")))
 	s.Apply(result("a2", mk("a2", "alpha", "http://h3/m"), mk("a2", "middle", "http://h4/m")))
+	s.Flush()
 
 	got := s.Snapshot().ScrapePools
 	want := []string{"alpha", "middle", "zebra"}
@@ -316,6 +329,7 @@ func TestSnapshotCounts(t *testing.T) {
 	res := result("a1", target(in, "a1", "http://h1/metrics", map[string]string{"instance": "h1"}), down)
 	res.Result.Dropped = []model.Target{dropped}
 	s.Apply(res)
+	s.Flush()
 
 	snap := s.Snapshot()
 	if snap.ActiveCount != 2 {
@@ -335,6 +349,7 @@ func TestSnapshotIsImmutable(t *testing.T) {
 	s := New()
 	s.Apply(result("a1", target(in, "a1", "http://h1/metrics", map[string]string{"instance": "h1"})))
 
+	s.Flush()
 	held := s.Snapshot()
 	before := len(held.Targets)
 
@@ -343,6 +358,7 @@ func TestSnapshotIsImmutable(t *testing.T) {
 	if after := len(held.Targets); after != before {
 		t.Errorf("held snapshot changed from %d to %d targets", before, after)
 	}
+	s.Flush()
 	if now := len(s.Snapshot().Targets); now != 2 {
 		t.Errorf("current snapshot has %d targets, want 2", now)
 	}
@@ -352,6 +368,7 @@ func TestSnapshotTakenAt(t *testing.T) {
 	s := New()
 	before := time.Now()
 	s.Apply(result("a1"))
+	s.Flush()
 	snap := s.Snapshot()
 	if snap.TakenAt.Before(before) {
 		t.Errorf("TakenAt %v predates the update at %v", snap.TakenAt, before)
@@ -366,6 +383,7 @@ func TestRetainAgents(t *testing.T) {
 	s.Apply(result("a2", target(in, "a2", "http://h2/metrics", map[string]string{"instance": "h2"})))
 
 	s.RetainAgents([]string{"a1"})
+	s.Flush()
 
 	snap := s.Snapshot()
 	if len(snap.Targets) != 1 {
@@ -384,6 +402,7 @@ func TestAgentsSortedByName(t *testing.T) {
 	for _, n := range []string{"zulu", "alpha", "mike"} {
 		s.Apply(result(n))
 	}
+	s.Flush()
 	got := s.Snapshot().Agents
 	want := []string{"alpha", "mike", "zulu"}
 	for i := range want {
@@ -414,6 +433,7 @@ func TestConcurrentApplyAndRead(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range 100 {
+				s.Flush()
 				snap := s.Snapshot()
 				for _, tgt := range snap.Targets {
 					_ = tgt.MultiScraped()
@@ -425,5 +445,69 @@ func TestConcurrentApplyAndRead(t *testing.T) {
 
 	if len(s.Snapshot().Agents) != 4 {
 		t.Errorf("agents = %d, want 4", len(s.Snapshot().Agents))
+	}
+}
+
+// Rebuilding the whole index costs O(targets), so a burst of agents reporting
+// at once must not trigger one rebuild each.
+func TestPublishIsCoalesced(t *testing.T) {
+	in := model.NewInterner()
+	s := New()
+
+	// Hold the first rebuild open so the rest of the burst is guaranteed to
+	// arrive while one is in flight, which is the case coalescing exists for.
+	// Without the gate the applies can finish one at a time and each
+	// legitimately gets its own rebuild.
+	var built atomic.Int64
+	release := make(chan struct{})
+	var once sync.Once
+	s.onPublish = func() {
+		built.Add(1)
+		once.Do(func() { <-release })
+	}
+
+	// The first apply starts a rebuild, which then blocks.
+	s.Apply(result("agent00", target(in, "agent00", "http://h00/metrics",
+		map[string]string{"instance": "http://h00/metrics"})))
+
+	var wg sync.WaitGroup
+	for a := 1; a < 20; a++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			name := fmt.Sprintf("agent%02d", a)
+			url := fmt.Sprintf("http://h%02d/metrics", a)
+			s.Apply(result(name, target(in, name, url, map[string]string{"instance": url})))
+		}()
+	}
+	wg.Wait()
+	close(release)
+	s.Flush()
+
+	// Every agent's data must be visible even though rebuilds were coalesced.
+	if got := len(s.Snapshot().Targets); got != 20 {
+		t.Errorf("targets = %d, want 20", got)
+	}
+	// The 19 applies that landed during the held rebuild collapse into one.
+	if got := built.Load(); got > 3 {
+		t.Errorf("rebuilt %d times for a burst of 20 applies; not coalesced", got)
+	}
+}
+
+// Coalescing must not lose the last write: a snapshot taken after the burst
+// settles has to include it.
+func TestCoalescedPublishEventuallyIncludesLastWrite(t *testing.T) {
+	in := model.NewInterner()
+	s := New()
+
+	for i := range 10 {
+		url := fmt.Sprintf("http://h%02d/metrics", i)
+		s.Apply(result("a1", target(in, "a1", url, map[string]string{"instance": url})))
+	}
+	s.Flush()
+
+	// The final Apply replaced a1's targets with a single one.
+	if got := len(s.Snapshot().Targets); got != 1 {
+		t.Errorf("targets = %d, want the last write's single target", got)
 	}
 }

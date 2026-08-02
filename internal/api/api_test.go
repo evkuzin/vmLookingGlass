@@ -58,6 +58,7 @@ func testServer(t *testing.T) (*store.Store, http.Handler) {
 	s.Apply(result("agent02",
 		target("agent02", "pool-a", "http://h3:9100/metrics", map[string]string{"instance": "h3:9100", "job": "node"}),
 	))
+	s.Flush()
 	return s, New(s, discardLogger()).Handler()
 }
 
@@ -119,6 +120,7 @@ func TestTargetsMergedAcrossAgents(t *testing.T) {
 	const url = "http://shared:9100/metrics"
 	s.Apply(result("agent01", target("agent01", "pool-a", url, labels)))
 	s.Apply(result("agent02", target("agent02", "pool-a", url, labels)))
+	s.Flush()
 
 	h := New(s, discardLogger()).Handler()
 	_, body := get(t, h, "/api/v1/targets")
@@ -144,6 +146,7 @@ func TestTargetsStateFilter(t *testing.T) {
 	res := result("agent01", target("agent01", "pool-a", "http://h1:9100/metrics", map[string]string{"instance": "h1"}))
 	res.Result.Dropped = []model.Target{dropped}
 	s.Apply(res)
+	s.Flush()
 
 	h := New(s, discardLogger()).Handler()
 
@@ -195,6 +198,7 @@ func TestDroppedTargetCounts(t *testing.T) {
 	res := result("agent01")
 	res.Result.Dropped = []model.Target{d1, d2}
 	s.Apply(res)
+	s.Flush()
 
 	h := New(s, discardLogger()).Handler()
 	_, body := get(t, h, "/api/v1/targets")
@@ -251,6 +255,7 @@ func TestSearchPagination(t *testing.T) {
 		targets = append(targets, target("agent01", "pool-a", url, map[string]string{"instance": url}))
 	}
 	s.Apply(result("agent01", targets...))
+	s.Flush()
 	h := New(s, discardLogger()).Handler()
 
 	_, body := get(t, h, "/api/v1/search?limit=10")
@@ -282,6 +287,7 @@ func TestSearchDefaultLimit(t *testing.T) {
 		targets = append(targets, target("agent01", "pool-a", url, map[string]string{"instance": url}))
 	}
 	s.Apply(result("agent01", targets...))
+	s.Flush()
 	h := New(s, discardLogger()).Handler()
 
 	_, body := get(t, h, "/api/v1/search")
@@ -344,6 +350,7 @@ func TestAgentsReportsFailure(t *testing.T) {
 		Name: "broken", URL: "http://broken:8429",
 		LastPoll: time.Now(), Interval: time.Minute, Err: "connection refused",
 	}})
+	s.Flush()
 	h := New(s, discardLogger()).Handler()
 
 	_, body := get(t, h, "/api/v1/agents")

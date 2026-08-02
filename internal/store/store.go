@@ -73,10 +73,25 @@ type Store struct {
 	agents map[string]*agentData
 
 	current atomic.Pointer[Snapshot]
+
+	// dirty is set when agent data changed and the published snapshot no
+	// longer reflects it.
+	dirty bool
+	// rebuilding guards against several goroutines rebuilding at once.
+	rebuilding bool
+	// settled is closed and replaced each time a rebuild finishes, so Flush
+	// can wait for one.
+	settled chan struct{}
+
+	// onPublish is called after each rebuild, for tests.
+	onPublish func()
 }
 
 func New() *Store {
-	s := &Store{agents: make(map[string]*agentData)}
+	s := &Store{
+		agents:  make(map[string]*agentData),
+		settled: make(chan struct{}),
+	}
 	s.current.Store(&Snapshot{TakenAt: time.Now(), byAgent: map[string]int{}})
 	return s
 }
@@ -112,7 +127,7 @@ func (s *Store) Apply(r poll.AgentResult) {
 	}
 
 	s.agents[name] = data
-	s.publish()
+	s.markDirty()
 }
 
 // RetainAgents drops any agent not in keep, so agents removed from the config
@@ -130,7 +145,60 @@ func (s *Store) RetainAgents(keep []string) {
 			delete(s.agents, name)
 		}
 	}
-	s.publish()
+	s.markDirty()
+}
+
+// markDirty records that agent data changed and starts a rebuild if one is
+// not already running. Callers hold s.mu.
+//
+// Rebuilding is O(total targets), so with a fleet of agents reporting
+// independently a rebuild per report would dominate: reports that arrive
+// while one is in flight are absorbed into the next.
+func (s *Store) markDirty() {
+	s.dirty = true
+	if s.rebuilding {
+		return
+	}
+	s.rebuilding = true
+	go s.rebuildLoop()
+}
+
+// rebuildLoop republishes until no further changes have arrived.
+func (s *Store) rebuildLoop() {
+	for {
+		s.mu.Lock()
+		if !s.dirty {
+			s.rebuilding = false
+			// Wake anything waiting for the store to settle.
+			close(s.settled)
+			s.settled = make(chan struct{})
+			s.mu.Unlock()
+			return
+		}
+		s.dirty = false
+		s.publish()
+		onPublish := s.onPublish
+		s.mu.Unlock()
+
+		if onPublish != nil {
+			onPublish()
+		}
+	}
+}
+
+// Flush waits for pending changes to be published. Without it a reader has no
+// way to know whether the newest report is visible yet.
+func (s *Store) Flush() {
+	for {
+		s.mu.Lock()
+		if !s.dirty && !s.rebuilding {
+			s.mu.Unlock()
+			return
+		}
+		wait := s.settled
+		s.mu.Unlock()
+		<-wait
+	}
 }
 
 // publish rebuilds the snapshot from current agent data. Callers hold s.mu.

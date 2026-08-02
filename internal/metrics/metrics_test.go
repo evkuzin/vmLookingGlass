@@ -125,6 +125,7 @@ func TestPerAgentGauges(t *testing.T) {
 	s := store.New()
 	s.Apply(okResult("agent01", 5, 4, 1, 2))
 	s.Apply(failResult("agent02", "boom"))
+	s.Flush()
 	m := New(prometheus.NewRegistry(), s, model.NewInterner())
 
 	body := scrape(t, m)
@@ -146,6 +147,7 @@ func TestPerAgentGauges(t *testing.T) {
 func TestPerAgentUpDownGauges(t *testing.T) {
 	s := store.New()
 	s.Apply(okResult("agent01", 10, 8, 2, 0))
+	s.Flush()
 	m := New(prometheus.NewRegistry(), s, model.NewInterner())
 
 	body := scrape(t, m)
@@ -166,6 +168,7 @@ func TestDroppedTruncatedFlag(t *testing.T) {
 	capped.Status.MaxDroppedTargets = 10000
 	capped.Status.DroppedTruncated = true
 	s.Apply(capped)
+	s.Flush()
 	m := New(prometheus.NewRegistry(), s, model.NewInterner())
 
 	body := scrape(t, m)
@@ -194,6 +197,7 @@ func TestSnapshotGauges(t *testing.T) {
 	r2 := okResult("agent02", 1, 1, 0, 0)
 	r2.Result.Active = []model.Target{tgt("agent02", "http://h1/m")}
 	s.Apply(r2)
+	s.Flush()
 
 	m := New(prometheus.NewRegistry(), s, in)
 	body := scrape(t, m)
@@ -228,6 +232,7 @@ func TestRemovedAgentGaugesDisappear(t *testing.T) {
 	s := store.New()
 	s.Apply(okResult("agent01", 5, 5, 0, 0))
 	s.Apply(okResult("agent02", 3, 3, 0, 0))
+	s.Flush()
 	m := New(prometheus.NewRegistry(), s, model.NewInterner())
 
 	if body := scrape(t, m); !hasSample(body, "vmlookingglass_agent_up", `agent="agent02"`) {
@@ -235,6 +240,7 @@ func TestRemovedAgentGaugesDisappear(t *testing.T) {
 	}
 
 	s.RetainAgents([]string{"agent01"})
+	s.Flush()
 
 	body := scrape(t, m)
 	if hasSample(body, "vmlookingglass_agent_up", `agent="agent02"`) {
@@ -250,6 +256,7 @@ func TestStaleAgentReported(t *testing.T) {
 	stale := okResult("agent01", 1, 1, 0, 0)
 	stale.Status.LastSuccess = time.Now().Add(-10 * time.Minute)
 	s.Apply(stale)
+	s.Flush()
 	m := New(prometheus.NewRegistry(), s, model.NewInterner())
 
 	if got := sampleValue(t, scrape(t, m), "vmlookingglass_agent_stale", `agent="agent01"`); got != "1" {
@@ -271,6 +278,7 @@ func TestGoAndProcessCollectorsRegistered(t *testing.T) {
 func TestExpositionIsWellFormed(t *testing.T) {
 	s := store.New()
 	s.Apply(okResult("agent01", 5, 4, 1, 2))
+	s.Flush()
 	m := New(prometheus.NewRegistry(), s, model.NewInterner())
 	m.RecordPoll(okResult("agent01", 5, 4, 1, 2))
 

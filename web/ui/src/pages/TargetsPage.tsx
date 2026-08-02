@@ -23,6 +23,8 @@ import {
 import { useState, type FC } from "react";
 import { StringParam, useQueryParam, withDefault } from "use-query-params";
 
+import { nextSort, SortHeaders, type SortColumn, type SortState } from "../components/SortHeader";
+
 import { useAPI } from "../api/api";
 import type { AgentsResult, SearchResult, Target } from "../api/types";
 import { HealthBadge } from "../components/HealthBadge";
@@ -176,6 +178,19 @@ const TargetRow: FC<{ target: Target }> = ({ target }) => {
   );
 };
 
+// Sorting is server-side: results are paged, so ordering only the returned
+// page would rank it against itself rather than against every match. The
+// value functions are unused here for that reason; the key is sent to the API.
+const columns: SortColumn<Target>[] = [
+  { key: "instance", label: "Instance", value: () => 0 },
+  { key: "pool", label: "Pool", value: () => 0 },
+  { key: "health", label: "Health", value: () => 0 },
+  { key: "agents", label: "Agents", value: () => 0 },
+  { key: "lastScrape", label: "Last scrape", value: () => 0, descFirst: true },
+  { key: "duration", label: "Duration", value: () => 0, descFirst: true },
+  { key: "samples", label: "Samples", value: () => 0, descFirst: true },
+];
+
 const examples = [
   "health=down",
   "labels.job=node",
@@ -187,6 +202,7 @@ const examples = [
 export const TargetsPage: FC = () => {
   const [filter, setFilter] = useQueryParam("filter", withDefault(StringParam, ""));
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<SortState>({ by: "", desc: false });
   const [debounced] = useDebouncedValue(filter.trim(), 300);
 
   const params = new URLSearchParams();
@@ -198,12 +214,16 @@ export const TargetsPage: FC = () => {
   }
   params.set("limit", String(pageSize));
   params.set("offset", String((page - 1) * pageSize));
+  if (sort.by) {
+    params.set("sort", sort.by);
+    params.set("order", sort.desc ? "desc" : "asc");
+  }
 
   // The fleet holds far more targets than any page can show, so nothing is
   // fetched until a filter narrows it.
   const enabled = debounced !== "";
   const { data, isLoading, error } = useAPI<SearchResult>(
-    [debounced, page],
+    [debounced, page, sort.by, sort.desc],
     "search",
     params,
     { enabled },
@@ -271,20 +291,17 @@ export const TargetsPage: FC = () => {
 
           <Table highlightOnHover striped>
             <Table.Thead>
-              <Table.Tr>
-                <Table.Th w={30} />
-                <Table.Th>Instance</Table.Th>
-                <Table.Th>Pool</Table.Th>
-                <Table.Th>Health</Table.Th>
-                <Table.Th>
-                  <Tooltip label="Agents scraping this target" withArrow>
-                    <span>Agents</span>
-                  </Tooltip>
-                </Table.Th>
-                <Table.Th>Last scrape</Table.Th>
-                <Table.Th>Duration</Table.Th>
-                <Table.Th>Samples</Table.Th>
-              </Table.Tr>
+              <SortHeaders
+                columns={columns}
+                sort={sort}
+                onSort={(c) => {
+                  setSort(nextSort(sort, c));
+                  // Sorting reorders the whole match set, so the old page
+                  // number no longer refers to the same rows.
+                  setPage(1);
+                }}
+                leading={() => <Table.Th w={30} />}
+              />
             </Table.Thead>
             <Table.Tbody>
               {data.targets.map((t) => (

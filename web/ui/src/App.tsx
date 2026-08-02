@@ -3,6 +3,7 @@ import { IconServer2, IconTarget } from "@tabler/icons-react";
 import type { FC } from "react";
 import { StringParam, useQueryParam, withDefault } from "use-query-params";
 
+import { ThemeToggle } from "./components/ThemeToggle";
 import { AgentsPage } from "./pages/AgentsPage";
 import { TargetsPage } from "./pages/TargetsPage";
 
@@ -20,16 +21,19 @@ export const App: FC = () => {
                 scrape targets across every agent
               </Text>
             </Group>
-            <Tabs value={tab} onChange={(v) => setTab(v ?? "targets")} variant="pills">
-              <Tabs.List>
-                <Tabs.Tab value="targets" leftSection={<IconTarget size={14} />}>
-                  Targets
-                </Tabs.Tab>
-                <Tabs.Tab value="agents" leftSection={<IconServer2 size={14} />}>
-                  Agents
-                </Tabs.Tab>
-              </Tabs.List>
-            </Tabs>
+            <Group gap="sm">
+              <Tabs value={tab} onChange={(v) => setTab(v ?? "targets")} variant="pills">
+                <Tabs.List>
+                  <Tabs.Tab value="targets" leftSection={<IconTarget size={14} />}>
+                    Targets
+                  </Tabs.Tab>
+                  <Tabs.Tab value="agents" leftSection={<IconServer2 size={14} />}>
+                    Agents
+                  </Tabs.Tab>
+                </Tabs.List>
+              </Tabs>
+              <ThemeToggle />
+            </Group>
           </Group>
         </Container>
       </AppShell.Header>

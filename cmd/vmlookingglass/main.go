@@ -74,7 +74,7 @@ func run(configPath, listenOverride string, log *slog.Logger) error {
 
 	srv := &http.Server{
 		Addr:              listen,
-		Handler:           api.New(d.Store(), log).Handler(),
+		Handler:           api.New(d.Store(), log).WithMetrics(d.Metrics().Handler()).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

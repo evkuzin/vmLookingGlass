@@ -6,7 +6,10 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/evkuzin/vmLookingGlass/internal/config"
+	"github.com/evkuzin/vmLookingGlass/internal/metrics"
 	"github.com/evkuzin/vmLookingGlass/internal/model"
 	"github.com/evkuzin/vmLookingGlass/internal/poll"
 	"github.com/evkuzin/vmLookingGlass/internal/store"
@@ -21,6 +24,7 @@ type Daemon struct {
 	store    *store.Store
 	poller   *poll.Poller
 	interner *model.Interner
+	metrics  *metrics.Metrics
 
 	mu      sync.Mutex
 	running map[string]*agentTask
@@ -36,19 +40,24 @@ type agentTask struct {
 }
 
 func New(log *slog.Logger) *Daemon {
-	return &Daemon{
+	d := &Daemon{
 		log:      log,
 		store:    store.New(),
 		poller:   poll.New(log),
 		interner: model.NewInterner(),
 		running:  make(map[string]*agentTask),
 	}
+	d.metrics = metrics.New(prometheus.NewRegistry(), d.store, d.interner)
+	return d
 }
+
+// Metrics returns the collector serving this process's own metrics.
+func (d *Daemon) Metrics() *metrics.Metrics { return d.metrics }
 
 // Store returns the aggregated snapshot store.
 func (d *Daemon) Store() *store.Store { return d.store }
 
-// Run starts polling and blocks until ctx is cancelled.
+// Run starts polling and blocks until ctx is canceled.
 func (d *Daemon) Run(ctx context.Context, c *config.Config) {
 	d.mu.Lock()
 	d.ctx = ctx
@@ -110,7 +119,7 @@ func (d *Daemon) start(a config.Agent) {
 	task := &agentTask{cfg: a, cancel: cancel, done: make(chan struct{})}
 	d.running[a.Name] = task
 
-	runner := poll.NewRunner(d.log, d.store.Apply)
+	runner := poll.NewRunner(d.log, d.publish)
 	runner.SetInterner(d.interner)
 
 	d.wg.Add(1)
@@ -122,8 +131,14 @@ func (d *Daemon) start(a config.Agent) {
 }
 
 // stopAll waits for every agent goroutine to exit so Run does not return while
-// polls are still in flight. Cancelling Run's context already signals them,
+// polls are still in flight. Canceling Run's context already signals them,
 // since each agent context derives from it.
+// publish records a poll result in both the store and the metrics.
+func (d *Daemon) publish(r poll.AgentResult) {
+	d.metrics.RecordPoll(r)
+	d.store.Apply(r)
+}
+
 func (d *Daemon) stopAll() {
 	d.mu.Lock()
 	clear(d.running)

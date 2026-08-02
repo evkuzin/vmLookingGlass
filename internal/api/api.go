@@ -20,12 +20,20 @@ const defaultSearchLimit = 1000
 
 // API serves target data from a snapshot store.
 type API struct {
-	store *store.Store
-	log   *slog.Logger
+	store   *store.Store
+	log     *slog.Logger
+	metrics http.Handler
 }
 
 func New(s *store.Store, log *slog.Logger) *API {
 	return &API{store: s, log: log}
+}
+
+// WithMetrics attaches the /metrics handler. Without it the endpoint is not
+// served, which keeps the API usable in tests that do not build a registry.
+func (a *API) WithMetrics(h http.Handler) *API {
+	a.metrics = h
+	return a
 }
 
 // Handler returns the router for all endpoints.
@@ -39,6 +47,9 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/agents", a.handleAgents)
 	mux.HandleFunc("GET /-/healthy", a.handleHealthy)
 	mux.HandleFunc("GET /-/ready", a.handleReady)
+	if a.metrics != nil {
+		mux.Handle("GET /metrics", a.metrics)
+	}
 	return methodGuard(mux)
 }
 
@@ -52,6 +63,7 @@ func methodGuard(next http.Handler) http.Handler {
 		"/api/v1/agents":       true,
 		"/-/healthy":           true,
 		"/-/ready":             true,
+		"/metrics":             true,
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && known[r.URL.Path] {

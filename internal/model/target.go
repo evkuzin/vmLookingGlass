@@ -122,6 +122,8 @@ type AgentStatus struct {
 	// DroppedTruncated marks that the agent hit its own dropped-target cap,
 	// so its dropped list is a partial and arbitrary subset.
 	DroppedTruncated bool
+	// MaxDroppedTargets is the cap the agent runs with, read from its flags.
+	MaxDroppedTargets int
 }
 
 // staleFactor is how many intervals may elapse before data is called stale.

@@ -25,11 +25,18 @@ const maxIdleConnsPerHost = 2
 type Poller struct {
 	client *http.Client
 	log    *slog.Logger
+
+	// droppedCaps holds each agent's dropped-target cap, read from its flags
+	// once. The cap only changes when an agent restarts with new arguments,
+	// so refetching it every poll would be wasted work.
+	mu          sync.Mutex
+	droppedCaps map[string]int
 }
 
 func New(log *slog.Logger) *Poller {
 	return &Poller{
-		log: log,
+		log:         log,
+		droppedCaps: make(map[string]int),
 		client: &http.Client{
 			Transport: &http.Transport{
 				MaxIdleConns:        256,
@@ -38,6 +45,23 @@ func New(log *slog.Logger) *Poller {
 			},
 		},
 	}
+}
+
+// droppedCap returns the agent's dropped-target cap, reading it once per agent.
+func (p *Poller) droppedCap(ctx context.Context, a config.Agent) int {
+	p.mu.Lock()
+	n, ok := p.droppedCaps[a.Name]
+	p.mu.Unlock()
+	if ok {
+		return n
+	}
+
+	n = p.fetchMaxDroppedTargets(ctx, a)
+
+	p.mu.Lock()
+	p.droppedCaps[a.Name] = n
+	p.mu.Unlock()
+	return n
 }
 
 // AgentResult pairs an agent's decoded targets with the outcome of the poll.
@@ -72,6 +96,13 @@ func (p *Poller) pollAgent(ctx context.Context, a config.Agent, in *model.Intern
 	status.LastSuccess = status.LastPoll
 	status.ActiveTargets = len(res.Active)
 	status.DroppedTargets = len(res.Dropped)
+
+	// The targets API reports neither the cap nor the true dropped total, so
+	// a list that reaches the agent's configured maximum is the only sign
+	// that entries were evicted.
+	status.MaxDroppedTargets = p.droppedCap(ctx, a)
+	status.DroppedTruncated = status.DroppedTargets >= status.MaxDroppedTargets
+
 	for i := range res.Active {
 		if res.Active[i].IsUp() {
 			status.UpTargets++
@@ -83,9 +114,9 @@ func (p *Poller) pollAgent(ctx context.Context, a config.Agent, in *model.Intern
 }
 
 func (p *Poller) fetch(ctx context.Context, a config.Agent, in *model.Interner) (*Result, error) {
-	// The agent URL is normalised at config load to scheme://host:port with no
+	// The agent URL is normalized at config load to scheme://host:port with no
 	// path or query, so the endpoint appends cleanly.
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL+targetsPath, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL+targetsPath, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +126,7 @@ func (p *Poller) fetch(ctx context.Context, a config.Agent, in *model.Interner) 
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("http %s", resp.Status)
@@ -144,7 +175,7 @@ func (r *Runner) Interner() *model.Interner { return r.interner }
 // vocabulary. It must be called before Run.
 func (r *Runner) SetInterner(in *model.Interner) { r.interner = in }
 
-// Run starts one goroutine per agent and blocks until ctx is cancelled.
+// Run starts one goroutine per agent and blocks until ctx is canceled.
 func (r *Runner) Run(ctx context.Context, agents []config.Agent) {
 	var wg sync.WaitGroup
 	for _, a := range agents {
@@ -157,7 +188,7 @@ func (r *Runner) Run(ctx context.Context, agents []config.Agent) {
 	wg.Wait()
 }
 
-// runAgent polls one agent until ctx is cancelled. Failures are reported and
+// runAgent polls one agent until ctx is canceled. Failures are reported and
 // retried on the next tick rather than ending the loop.
 func (r *Runner) runAgent(ctx context.Context, a config.Agent) {
 	if d := r.startDelay(a.Interval); d > 0 {
@@ -183,7 +214,7 @@ func (r *Runner) runAgent(ctx context.Context, a config.Agent) {
 
 func (r *Runner) pollOnce(ctx context.Context, a config.Agent) {
 	res, status := r.poller.pollAgent(ctx, a, r.interner)
-	// A cancelled context means shutdown, not an agent fault; the partial
+	// A canceled context means shutdown, not an agent fault; the partial
 	// result would otherwise be published as a spurious failure.
 	if ctx.Err() != nil {
 		return

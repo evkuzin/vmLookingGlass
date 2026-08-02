@@ -178,12 +178,17 @@ func TestPollRequestsAllStates(t *testing.T) {
 
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
-	if len(srv.paths) != 1 {
-		t.Fatalf("got %d requests, want 1", len(srv.paths))
+	var got string
+	for _, p := range srv.paths {
+		if strings.HasPrefix(p, "/api/v1/targets") {
+			if got != "" {
+				t.Fatalf("targets requested more than once: %v", srv.paths)
+			}
+			got = p
+		}
 	}
-	got := srv.paths[0]
-	if !strings.HasPrefix(got, "/api/v1/targets") {
-		t.Errorf("path = %q, want it to start with /api/v1/targets", got)
+	if got == "" {
+		t.Fatalf("targets never requested: %v", srv.paths)
 	}
 	if !strings.Contains(got, "state=any") {
 		t.Errorf("path = %q, want state=any so dropped targets are included", got)

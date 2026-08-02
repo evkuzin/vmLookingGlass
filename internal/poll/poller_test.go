@@ -528,3 +528,30 @@ func TestRunnerStopsOnCancel(t *testing.T) {
 		t.Errorf("agent polled %d more times after shutdown", after-before)
 	}
 }
+
+// Target payloads are label-heavy JSON that compresses about twentyfold, so
+// the fleet transfers gigabytes per cycle without compression.
+//
+// The transport adds Accept-Encoding and decompresses transparently only
+// while no explicit Accept-Encoding is set. Setting one silently opts out of
+// both, which this pins against.
+func TestPollNegotiatesCompression(t *testing.T) {
+	var sawEncoding string
+	srv := newAgentServer(t, func(w http.ResponseWriter, r *http.Request) {
+		sawEncoding = r.Header.Get("Accept-Encoding")
+		fmt.Fprint(w, targetsBody(1))
+	})
+
+	p := New(discardLogger())
+	res, status := p.pollAgent(context.Background(), agentCfg("a1", srv.URL), model.NewInterner())
+	if status.Err != "" {
+		t.Fatalf("poll failed: %s", status.Err)
+	}
+	if !strings.Contains(sawEncoding, "gzip") {
+		t.Errorf("Accept-Encoding = %q, want it to offer gzip", sawEncoding)
+	}
+	// Decompression has to stay transparent, or the body would not parse.
+	if len(res.Active) != 1 {
+		t.Errorf("active = %d, want 1", len(res.Active))
+	}
+}

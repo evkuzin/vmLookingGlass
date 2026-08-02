@@ -9,7 +9,7 @@ comma := ,
 # through TLS interception. Omit it to build off-network.
 CA_SECRET = $(if $(BUILD_CA),--secret id=build_ca$(comma)src=$(BUILD_CA))
 
-.PHONY: all build ui image test race lint clean help
+.PHONY: all build ui image extract test race lint clean help
 
 all: build
 
@@ -26,6 +26,15 @@ ui:
 image:
 	DOCKER_BUILDKIT=1 docker build $(CA_SECRET) \
 	  -t vmlookingglass:$(or $(TAG),dev) .
+
+## extract: copy the binaries out of the image into bin/
+extract: image
+	@mkdir -p $(BIN)
+	$(eval CID := $(shell docker create vmlookingglass:$(or $(TAG),dev)))
+	@docker cp $(CID):/usr/bin/vmlookingglass $(BIN)/vmlookingglass
+	@docker cp $(CID):/usr/bin/vmlg $(BIN)/vmlg
+	@docker rm -v $(CID) >/dev/null
+	@echo "binaries with the embedded UI are in $(BIN)/"
 
 ## test: run the test suite
 test:

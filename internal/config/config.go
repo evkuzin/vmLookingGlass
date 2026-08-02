@@ -115,6 +115,22 @@ func (c *Config) applyDefaults() error {
 	return nil
 }
 
+// Equal reports whether two agent configs are identical. Agent contains a map,
+// so it cannot be compared with ==.
+func (a Agent) Equal(b Agent) bool {
+	if a.Name != b.Name || a.URL != b.URL ||
+		a.Interval != b.Interval || a.Timeout != b.Timeout ||
+		len(a.Labels) != len(b.Labels) {
+		return false
+	}
+	for k, v := range a.Labels {
+		if w, ok := b.Labels[k]; !ok || v != w {
+			return false
+		}
+	}
+	return true
+}
+
 // normalise expands shorthand URL forms and derives a default name.
 func (a *Agent) normalise() error {
 	if a.URL == "" {

@@ -140,6 +140,10 @@ func NewRunner(log *slog.Logger, publish PublishFunc) *Runner {
 // Interner returns the shared label interner.
 func (r *Runner) Interner() *model.Interner { return r.interner }
 
+// SetInterner replaces the interner, so several runners can share one label
+// vocabulary. It must be called before Run.
+func (r *Runner) SetInterner(in *model.Interner) { r.interner = in }
+
 // Run starts one goroutine per agent and blocks until ctx is cancelled.
 func (r *Runner) Run(ctx context.Context, agents []config.Agent) {
 	var wg sync.WaitGroup

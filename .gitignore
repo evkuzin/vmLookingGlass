@@ -7,3 +7,6 @@ web/ui/dist/
 
 # Local generated config with real host names.
 /config.yml
+
+# Editor state.
+.vscode/

@@ -426,3 +426,35 @@ func TestPprofEnabled(t *testing.T) {
 		}
 	}
 }
+
+// The agents endpoint carries recent poll outcomes so the UI can draw an
+// availability bar without a time-series backend.
+func TestAgentsIncludeHistory(t *testing.T) {
+	s := store.New()
+	now := time.Now()
+	ok := result("agent01")
+	ok.Status.LastPoll = now.Add(-2 * time.Minute)
+	s.Apply(ok)
+
+	bad := poll.AgentResult{Status: model.AgentStatus{
+		Name: "agent01", LastPoll: now.Add(-time.Minute),
+		Interval: time.Minute, Err: "connection refused",
+	}}
+	s.Apply(bad)
+	s.Flush()
+
+	h := New(s, discardLogger()).Handler()
+	_, body := get(t, h, "/api/v1/agents")
+
+	agent := body["data"].(map[string]any)["agents"].([]any)[0].(map[string]any)
+	hist, isSlice := agent["history"].([]any)
+	if !isSlice || len(hist) != 2 {
+		t.Fatalf("history = %v, want 2 entries", agent["history"])
+	}
+	if first := hist[0].(map[string]any); first["ok"] != true {
+		t.Errorf("first poll ok = %v, want true", first["ok"])
+	}
+	if second := hist[1].(map[string]any); second["ok"] != false {
+		t.Errorf("second poll ok = %v, want false", second["ok"])
+	}
+}

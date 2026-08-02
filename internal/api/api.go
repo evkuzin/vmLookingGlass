@@ -279,6 +279,17 @@ type jsonAgent struct {
 
 	Healthy bool `json:"healthy"`
 	Stale   bool `json:"stale"`
+
+	// History is recent poll outcomes, oldest first, for an availability bar.
+	// It is in-memory only, so it starts empty after a restart.
+	History []jsonPoll `json:"history,omitempty"`
+}
+
+// jsonPoll is one poll outcome. Fields are short because an agent carries
+// hundreds of them.
+type jsonPoll struct {
+	At time.Time `json:"at"`
+	OK bool      `json:"ok"`
 }
 
 func (a *API) handleAgents(w http.ResponseWriter, r *http.Request) {
@@ -302,6 +313,7 @@ func (a *API) handleAgents(w http.ResponseWriter, r *http.Request) {
 			DownTargets:    s.DownTargets,
 			Healthy:        s.Healthy(),
 			Stale:          s.IsStale(now),
+			History:        history(snap.History(s.Name)),
 		})
 	}
 
@@ -316,6 +328,17 @@ func (a *API) handleAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleHealthy reports process liveness, independent of agent state.
+func history(recs []store.PollRecord) []jsonPoll {
+	if len(recs) == 0 {
+		return nil
+	}
+	out := make([]jsonPoll, 0, len(recs))
+	for _, r := range recs {
+		out = append(out, jsonPoll{At: r.At, OK: r.OK})
+	}
+	return out
+}
+
 func (a *API) handleHealthy(w http.ResponseWriter, r *http.Request) {
 	writePlain(w, http.StatusOK, "OK")
 }

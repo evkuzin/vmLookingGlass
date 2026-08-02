@@ -4,6 +4,7 @@ import type { FC } from "react";
 
 import { useAPI } from "../api/api";
 import type { AgentsResult } from "../api/types";
+import { UptimeBar } from "../components/UptimeBar";
 import { formatCount, formatRelative } from "../lib/format";
 
 const stateBadge = (healthy: boolean, stale: boolean) => {
@@ -58,6 +59,7 @@ export const AgentsPage: FC = () => {
             <Table.Th>Last poll</Table.Th>
             <Table.Th>Poll time</Table.Th>
             <Table.Th>Error</Table.Th>
+            <Table.Th>Last 12h</Table.Th>
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -85,6 +87,9 @@ export const AgentsPage: FC = () => {
               </Table.Td>
               <Table.Td>
                 <Text size="xs" c="red">{a.error ?? ""}</Text>
+              </Table.Td>
+              <Table.Td>
+                <UptimeBar history={a.history} />
               </Table.Td>
             </Table.Tr>
           ))}

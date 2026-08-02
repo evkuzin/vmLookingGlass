@@ -68,7 +68,12 @@ type Snapshot struct {
 	DownCount    int
 
 	byAgent map[string]int
+	history map[string][]PollRecord
 }
+
+// History returns the agent's recent poll outcomes, oldest first, or nil if
+// the agent is unknown.
+func (s *Snapshot) History(agent string) []PollRecord { return s.history[agent] }
 
 // Agent returns the status for the named agent, or nil if absent.
 func (s *Snapshot) Agent(name string) *model.AgentStatus {
@@ -79,11 +84,28 @@ func (s *Snapshot) Agent(name string) *model.AgentStatus {
 	return &s.Agents[i]
 }
 
+// HistoryWindow bounds how far back per-agent poll history is kept. It is
+// held only in memory, so a restart starts the record over.
+const HistoryWindow = 12 * time.Hour
+
+// HistoryLimit caps entries per agent, so a short poll interval cannot grow
+// the history without bound inside the window.
+const HistoryLimit = 720
+
+// PollRecord is the outcome of one poll, for showing an agent's recent
+// availability.
+type PollRecord struct {
+	At time.Time
+	OK bool
+}
+
 // agentData is one agent's most recent successful poll plus its latest status.
 type agentData struct {
 	status  model.AgentStatus
 	active  []model.Target
 	dropped []model.Target
+	// history is oldest-first, trimmed to the window on each poll.
+	history []PollRecord
 }
 
 // Store accumulates per-agent poll results and publishes merged snapshots.
@@ -148,8 +170,35 @@ func (s *Store) Apply(r poll.AgentResult) {
 		data.status.DownTargets = prev.status.DownTargets
 	}
 
+	data.history = appendHistory(prev, r)
 	s.agents[name] = data
 	s.markDirty()
+}
+
+// appendHistory adds this poll's outcome and drops what has aged out.
+func appendHistory(prev *agentData, r poll.AgentResult) []PollRecord {
+	var h []PollRecord
+	if prev != nil {
+		h = prev.history
+	}
+	at := r.Status.LastPoll
+	if at.IsZero() {
+		at = time.Now()
+	}
+	h = append(h, PollRecord{At: at, OK: r.Status.Err == ""})
+
+	cutoff := time.Now().Add(-HistoryWindow)
+	first := 0
+	for first < len(h) && h[first].At.Before(cutoff) {
+		first++
+	}
+	if excess := len(h) - first - HistoryLimit; excess > 0 {
+		first += excess
+	}
+	if first > 0 {
+		h = append([]PollRecord(nil), h[first:]...)
+	}
+	return h
 }
 
 // RetainAgents drops any agent not in keep, so agents removed from the config
@@ -229,6 +278,7 @@ func (s *Store) publish() {
 		TakenAt: time.Now(),
 		Agents:  make([]model.AgentStatus, 0, len(s.agents)),
 		byAgent: make(map[string]int, len(s.agents)),
+		history: make(map[string][]PollRecord, len(s.agents)),
 	}
 
 	byKey := make(map[model.TargetKey]*Entry)
@@ -244,6 +294,7 @@ func (s *Store) publish() {
 		data := s.agents[name]
 		snap.byAgent[name] = len(snap.Agents)
 		snap.Agents = append(snap.Agents, data.status)
+		snap.history[name] = data.history
 
 		for _, list := range [][]model.Target{data.active, data.dropped} {
 			for i := range list {

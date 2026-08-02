@@ -31,6 +31,11 @@ export type SearchResult = {
   takenAt: string;
 };
 
+export type PollRecord = {
+  at: string;
+  ok: boolean;
+};
+
 export type Agent = {
   name: string;
   url: string;
@@ -45,6 +50,9 @@ export type Agent = {
   downTargets: number;
   healthy: boolean;
   stale: boolean;
+  // Recent poll outcomes, oldest first. In-memory only, so it is empty after
+  // a restart.
+  history?: PollRecord[];
 };
 
 export type AgentsResult = {

@@ -200,12 +200,12 @@ func skipValue(dec *json.Decoder) error {
 	if !ok {
 		return nil
 	}
-	var close rune
+	var closing rune
 	switch open {
 	case '{':
-		close = '}'
+		closing = '}'
 	case '[':
-		close = ']'
+		closing = ']'
 	default:
 		return fmt.Errorf("unexpected delimiter %v", open)
 	}
@@ -214,5 +214,5 @@ func skipValue(dec *json.Decoder) error {
 			return err
 		}
 	}
-	return expectDelim(dec, close)
+	return expectDelim(dec, closing)
 }

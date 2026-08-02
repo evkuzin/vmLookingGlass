@@ -36,7 +36,7 @@ type Agent struct {
 	// Name identifies the agent in the UI and API. Defaults to the URL host.
 	Name string `yaml:"name"`
 	// URL is the agent base URL. A bare host or host:port is accepted and
-	// normalised to http://host:port.
+	// normalized to http://host:port.
 	URL string `yaml:"url"`
 	// Labels are attached to every target reported by this agent, for grouping
 	// agents by region or environment.
@@ -93,7 +93,7 @@ func (c *Config) applyDefaults() error {
 	seenURL := make(map[string]int, len(c.Agents))
 	for i := range c.Agents {
 		a := &c.Agents[i]
-		if err := a.normalise(); err != nil {
+		if err := a.normalize(); err != nil {
 			return fmt.Errorf("agent %d: %w", i, err)
 		}
 		if a.Interval <= 0 {
@@ -131,8 +131,8 @@ func (a Agent) Equal(b Agent) bool {
 	return true
 }
 
-// normalise expands shorthand URL forms and derives a default name.
-func (a *Agent) normalise() error {
+// normalize expands shorthand URL forms and derives a default name.
+func (a *Agent) normalize() error {
 	if a.URL == "" {
 		return fmt.Errorf("url is required")
 	}

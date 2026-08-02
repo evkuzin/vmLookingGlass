@@ -48,7 +48,7 @@ func (w *Watcher) Config() *Config { return w.current.Load() }
 // It must be called before Run.
 func (w *Watcher) OnReload(f func(*Config)) { w.onReload = f }
 
-// Run watches the config file until ctx is cancelled.
+// Run watches the config file until ctx is canceled.
 //
 // The parent directory is watched rather than the file itself: generators
 // typically write a temp file and rename it over the target, which replaces
@@ -58,7 +58,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer fsw.Close()
+	defer func() { _ = fsw.Close() }()
 
 	if err := fsw.Add(filepath.Dir(w.path)); err != nil {
 		return err

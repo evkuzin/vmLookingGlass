@@ -123,7 +123,7 @@ func (m *labelMatcher) match(e *store.Entry) bool {
 // parseLabel handles labels.<name>=<regex>, =~ and !~.
 //
 // "=" anchors the pattern against the whole value while "=~" and "!~" search
-// for it anywhere, matching the behaviour of the original tool.
+// for it anywhere, matching the behavior of the original tool.
 func parseLabel(expr string) (matcher, error) {
 	rest := strings.TrimPrefix(expr, "labels.")
 

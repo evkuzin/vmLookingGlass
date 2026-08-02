@@ -267,7 +267,7 @@ func TestReloadDoesNotLeakGoroutines(t *testing.T) {
 	}
 	awaitTargets(t, d, 1)
 
-	// Allow the last cancelled loops to unwind.
+	// Allow the last canceled loops to unwind.
 	deadline := time.After(3 * time.Second)
 	for runtime.NumGoroutine() > settled+5 {
 		select {
@@ -308,7 +308,7 @@ func TestReloadWaitsForRemovedAgentToExit(t *testing.T) {
 	}
 }
 
-// Cancelling the daemon stops every agent, not just the first.
+// Canceling the daemon stops every agent, not just the first.
 func TestShutdownStopsEveryAgent(t *testing.T) {
 	s1, hits1 := agentServer(t, "h1")
 	s2, hits2 := agentServer(t, "h2")

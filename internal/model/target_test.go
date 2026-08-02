@@ -59,7 +59,7 @@ func TestTargetKeyOrderIndependent(t *testing.T) {
 }
 
 // Key must hash field boundaries, not just field contents. These two targets
-// serialise to the same byte stream under any scheme that concatenates
+// serialize to the same byte stream under any scheme that concatenates
 // names and values without encoding their lengths.
 func TestTargetKeyNoSeparatorCollision(t *testing.T) {
 	in := NewInterner()

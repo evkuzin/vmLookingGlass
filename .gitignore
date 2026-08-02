@@ -4,3 +4,6 @@
 *.out
 node_modules/
 web/ui/dist/
+
+# Local generated config with real host names.
+/config.yml

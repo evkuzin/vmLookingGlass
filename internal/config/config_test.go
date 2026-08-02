@@ -57,7 +57,7 @@ agents:
 	}
 }
 
-func TestNormaliseURL(t *testing.T) {
+func TestNormalizeURL(t *testing.T) {
 	tests := []struct {
 		in, want string
 	}{
@@ -70,12 +70,12 @@ func TestNormaliseURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		a := Agent{URL: tt.in}
-		if err := a.normalise(); err != nil {
-			t.Errorf("normalise(%q): %v", tt.in, err)
+		if err := a.normalize(); err != nil {
+			t.Errorf("normalize(%q): %v", tt.in, err)
 			continue
 		}
 		if a.URL != tt.want {
-			t.Errorf("normalise(%q) = %q, want %q", tt.in, a.URL, tt.want)
+			t.Errorf("normalize(%q) = %q, want %q", tt.in, a.URL, tt.want)
 		}
 	}
 }

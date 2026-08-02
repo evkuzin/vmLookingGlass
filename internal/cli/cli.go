@@ -104,7 +104,7 @@ func Run(args []string, out io.Writer) error {
 		return err
 	}
 
-	base, err := normaliseAddr(*addr)
+	base, err := normalizeAddr(*addr)
 	if err != nil {
 		return err
 	}
@@ -118,7 +118,6 @@ func Run(args []string, out io.Writer) error {
 
 func runSearch(client *http.Client, base string, filters []string,
 	format, cols, tmpl string, noHeader bool, limit, offset int, out io.Writer) error {
-
 	q := url.Values{}
 	for _, f := range filters {
 		q.Add("filter", f)
@@ -359,7 +358,7 @@ func fetch(client *http.Client, endpoint string, q url.Values, v any) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -386,8 +385,8 @@ func fetch(client *http.Client, endpoint string, q url.Values, v any) ([]byte, e
 	return envelope.Data, nil
 }
 
-// normaliseAddr accepts a bare host, host:port or a full URL.
-func normaliseAddr(addr string) (string, error) {
+// normalizeAddr accepts a bare host, host:port or a full URL.
+func normalizeAddr(addr string) (string, error) {
 	if !strings.Contains(addr, "://") {
 		addr = "http://" + addr
 	}

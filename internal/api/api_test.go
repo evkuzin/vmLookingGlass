@@ -63,7 +63,7 @@ func testServer(t *testing.T) (*store.Store, http.Handler) {
 func get(t *testing.T, h http.Handler, path string) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, http.NoBody))
 
 	var body map[string]any
 	if ct := rec.Header().Get("Content-Type"); ct == "application/json" {
@@ -362,7 +362,7 @@ func TestHealthEndpoints(t *testing.T) {
 	_, h := testServer(t)
 	for _, path := range []string{"/-/healthy", "/-/ready"} {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, http.NoBody))
 		if rec.Code != http.StatusOK {
 			t.Errorf("%s: status = %d, want 200", path, rec.Code)
 		}
@@ -372,7 +372,7 @@ func TestHealthEndpoints(t *testing.T) {
 func TestMethodNotAllowed(t *testing.T) {
 	_, h := testServer(t)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/targets", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/targets", http.NoBody))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST status = %d, want 405", rec.Code)
 	}
@@ -381,7 +381,7 @@ func TestMethodNotAllowed(t *testing.T) {
 func TestUnknownPath(t *testing.T) {
 	_, h := testServer(t)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/nonexistent", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/nonexistent", http.NoBody))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}

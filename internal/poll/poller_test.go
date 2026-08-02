@@ -487,8 +487,9 @@ func TestRunnerSharesInterner(t *testing.T) {
 	if first.Result == nil || second.Result == nil {
 		t.Fatal("expected results from both agents")
 	}
-	x := first.Result.Active[0].Labels.Get("instance")
-	y := second.Result.Active[0].Labels.Get("instance")
+	shared := r.Interner()
+	x := shared.Lookup(first.Result.Active[0].Labels[0].Value)
+	y := shared.Lookup(second.Result.Active[0].Labels[0].Value)
 	if x != y {
 		t.Fatalf("instance labels differ: %q vs %q", x, y)
 	}

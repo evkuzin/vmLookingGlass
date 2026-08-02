@@ -158,7 +158,7 @@ func (raw *rawTarget) toTarget(agent string, in *model.Interner, dropped bool) m
 		// Dropped entries omit scrapePool, but the pre-relabel job label holds
 		// the same value.
 		if t.ScrapePool == "" {
-			t.ScrapePool = t.DiscoveredLabels.Get("job")
+			t.ScrapePool = t.DiscoveredLabels.Get(in, model.LabelJob)
 		}
 	}
 	return t

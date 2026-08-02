@@ -59,11 +59,11 @@ func TestDecodeActiveTarget(t *testing.T) {
 	if tgt.LastScrapeDuration != 0.393 {
 		t.Errorf("LastScrapeDuration = %v, want 0.393", tgt.LastScrapeDuration)
 	}
-	if tgt.Labels.Get("instance") != "host1:9100" {
-		t.Errorf("instance = %q", tgt.Labels.Get("instance"))
+	if tgt.Labels.Get(in, "instance") != "host1:9100" {
+		t.Errorf("instance = %q", tgt.Labels.Get(in, "instance"))
 	}
-	if tgt.DiscoveredLabels.Get("__address__") != "10.0.0.1:9100" {
-		t.Errorf("__address__ = %q", tgt.DiscoveredLabels.Get("__address__"))
+	if tgt.DiscoveredLabels.Get(in, "__address__") != "10.0.0.1:9100" {
+		t.Errorf("__address__ = %q", tgt.DiscoveredLabels.Get(in, "__address__"))
 	}
 	if tgt.Dropped {
 		t.Error("active target marked dropped")

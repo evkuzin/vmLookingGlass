@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/evkuzin/vmLookingGlass/internal/model"
 	"github.com/evkuzin/vmLookingGlass/internal/store"
 )
 
@@ -21,9 +22,10 @@ const (
 	StateAny     = "any"
 )
 
-// matcher tests one condition against a target.
+// matcher tests one condition against a target. Label matchers need the
+// interner because a label carries indices, not text.
 type matcher interface {
-	match(e *store.Entry) bool
+	match(in *model.Interner, e *store.Entry) bool
 }
 
 // Query is a set of filters that a target must all satisfy.
@@ -52,9 +54,9 @@ func Parse(exprs []string) (*Query, error) {
 }
 
 // Match reports whether a target satisfies every filter.
-func (q *Query) Match(e *store.Entry) bool {
+func (q *Query) Match(in *model.Interner, e *store.Entry) bool {
 	for _, m := range q.matchers {
-		if !m.match(e) {
+		if !m.match(in, e) {
 			return false
 		}
 	}
@@ -62,13 +64,13 @@ func (q *Query) Match(e *store.Entry) bool {
 }
 
 // Filter returns the matching targets, preserving input order.
-func (q *Query) Filter(targets []*store.Entry) []*store.Entry {
+func (q *Query) Filter(in *model.Interner, targets []*store.Entry) []*store.Entry {
 	if len(q.matchers) == 0 {
 		return targets
 	}
 	out := make([]*store.Entry, 0, len(targets))
 	for _, e := range targets {
-		if q.Match(e) {
+		if q.Match(in, e) {
 			out = append(out, e)
 		}
 	}
@@ -112,11 +114,11 @@ type labelMatcher struct {
 	negated bool
 }
 
-func (m *labelMatcher) match(e *store.Entry) bool {
-	if !e.Labels.Has(m.name) {
+func (m *labelMatcher) match(in *model.Interner, e *store.Entry) bool {
+	if !e.Labels.Has(in, m.name) {
 		return m.negated
 	}
-	got := m.re.MatchString(e.Labels.Get(m.name))
+	got := m.re.MatchString(e.Labels.Get(in, m.name))
 	return got != m.negated
 }
 
@@ -158,7 +160,9 @@ type fieldMatcher struct {
 	value func(*store.Entry) string
 }
 
-func (m *fieldMatcher) match(e *store.Entry) bool { return m.re.MatchString(m.value(e)) }
+func (m *fieldMatcher) match(_ *model.Interner, e *store.Entry) bool {
+	return m.re.MatchString(m.value(e))
+}
 
 func parseRegexField(expr, field string, value func(*store.Entry) string) (matcher, error) {
 	pattern, err := valueAfter(expr, field)
@@ -176,7 +180,7 @@ func parseRegexField(expr, field string, value func(*store.Entry) string) (match
 // target merged across agents belongs to all of them.
 type agentMatcher struct{ re *regexp.Regexp }
 
-func (m *agentMatcher) match(e *store.Entry) bool {
+func (m *agentMatcher) match(_ *model.Interner, e *store.Entry) bool {
 	for _, a := range e.Agents {
 		if m.re.MatchString(a) {
 			return true
@@ -200,7 +204,7 @@ func parseAgent(expr string) (matcher, error) {
 // healthMatcher compares health exactly rather than as a pattern.
 type healthMatcher struct{ want string }
 
-func (m *healthMatcher) match(e *store.Entry) bool { return e.Health == m.want }
+func (m *healthMatcher) match(_ *model.Interner, e *store.Entry) bool { return e.Health == m.want }
 
 func parseHealth(expr string) (matcher, error) {
 	v, err := valueAfter(expr, "health")
@@ -213,7 +217,7 @@ func parseHealth(expr string) (matcher, error) {
 // stateMatcher selects active or dropped targets.
 type stateMatcher struct{ state string }
 
-func (m *stateMatcher) match(e *store.Entry) bool {
+func (m *stateMatcher) match(_ *model.Interner, e *store.Entry) bool {
 	switch m.state {
 	case StateActive:
 		return !e.Dropped
@@ -246,7 +250,7 @@ type floatMatcher struct {
 	value func(*store.Entry) float64
 }
 
-func (m *floatMatcher) match(e *store.Entry) bool {
+func (m *floatMatcher) match(_ *model.Interner, e *store.Entry) bool {
 	return compareOrdered(m.op, m.value(e), m.want)
 }
 
@@ -270,7 +274,7 @@ type intMatcher struct {
 	value func(*store.Entry) int64
 }
 
-func (m *intMatcher) match(e *store.Entry) bool {
+func (m *intMatcher) match(_ *model.Interner, e *store.Entry) bool {
 	return compareOrdered(m.op, m.value(e), m.want)
 }
 

@@ -130,7 +130,7 @@ type jsonTarget struct {
 	Disputed      bool              `json:"disputed,omitempty"`
 }
 
-func toJSON(e *store.Entry) jsonTarget {
+func toJSON(in *model.Interner, e *store.Entry) jsonTarget {
 	agent := ""
 	if len(e.Agents) > 0 {
 		agent = e.Agents[0]
@@ -143,8 +143,8 @@ func toJSON(e *store.Entry) jsonTarget {
 		byAgent = e.HealthByAgent
 	}
 	return jsonTarget{
-		DiscoveredLabels:   e.DiscoveredLabels.Map(),
-		Labels:             e.Labels.Map(),
+		DiscoveredLabels:   e.DiscoveredLabels.Map(in),
+		Labels:             e.Labels.Map(in),
 		ScrapePool:         e.ScrapePool,
 		ScrapeURL:          e.ScrapeURL,
 		LastError:          e.LastError,
@@ -168,6 +168,7 @@ func toJSON(e *store.Entry) jsonTarget {
 // than a large response. Callers narrow with state and scrapePool.
 func (a *API) handleTargets(w http.ResponseWriter, r *http.Request) {
 	snap := a.store.Snapshot()
+	in := a.store.Interner()
 
 	state := r.URL.Query().Get("state")
 	if state == "" {
@@ -194,13 +195,13 @@ func (a *API) handleTargets(w http.ResponseWriter, r *http.Request) {
 			if state == search.StateActive {
 				continue
 			}
-			dropped = append(dropped, toJSON(e))
+			dropped = append(dropped, toJSON(in, e))
 			continue
 		}
 		if state == search.StateDropped {
 			continue
 		}
-		active = append(active, toJSON(e))
+		active = append(active, toJSON(in, e))
 	}
 
 	writeData(w, map[string]any{
@@ -221,26 +222,26 @@ func (a *API) handleScrapePools(w http.ResponseWriter, r *http.Request) {
 // sortFields are the orderings the search endpoint accepts. Sorting happens
 // server-side because results are paged: ordering only the returned page
 // would rank it against itself rather than against the whole match set.
-var sortFields = map[string]func(a, b *store.Entry) int{
-	model.LabelInstance: func(a, b *store.Entry) int {
-		return strings.Compare(a.Instance(), b.Instance())
+var sortFields = map[string]func(in *model.Interner, a, b *store.Entry) int{
+	model.LabelInstance: func(in *model.Interner, a, b *store.Entry) int {
+		return strings.Compare(a.Instance(in), b.Instance(in))
 	},
-	model.LabelJob: func(a, b *store.Entry) int {
-		return strings.Compare(a.Job(), b.Job())
+	model.LabelJob: func(in *model.Interner, a, b *store.Entry) int {
+		return strings.Compare(a.Job(in), b.Job(in))
 	},
-	"pool":   func(a, b *store.Entry) int { return strings.Compare(a.ScrapePool, b.ScrapePool) },
-	"health": func(a, b *store.Entry) int { return strings.Compare(a.Health, b.Health) },
-	"url":    func(a, b *store.Entry) int { return strings.Compare(a.ScrapeURL, b.ScrapeURL) },
-	"lastScrape": func(a, b *store.Entry) int {
+	"pool":   func(_ *model.Interner, a, b *store.Entry) int { return strings.Compare(a.ScrapePool, b.ScrapePool) },
+	"health": func(_ *model.Interner, a, b *store.Entry) int { return strings.Compare(a.Health, b.Health) },
+	"url":    func(_ *model.Interner, a, b *store.Entry) int { return strings.Compare(a.ScrapeURL, b.ScrapeURL) },
+	"lastScrape": func(_ *model.Interner, a, b *store.Entry) int {
 		return a.LastScrape.Compare(b.LastScrape)
 	},
-	"duration": func(a, b *store.Entry) int {
+	"duration": func(_ *model.Interner, a, b *store.Entry) int {
 		return cmp.Compare(a.LastScrapeDuration, b.LastScrapeDuration)
 	},
-	"samples": func(a, b *store.Entry) int {
+	"samples": func(_ *model.Interner, a, b *store.Entry) int {
 		return cmp.Compare(a.LastSamplesScraped, b.LastSamplesScraped)
 	},
-	"agents": func(a, b *store.Entry) int { return cmp.Compare(len(a.Agents), len(b.Agents)) },
+	"agents": func(_ *model.Interner, a, b *store.Entry) int { return cmp.Compare(len(a.Agents), len(b.Agents)) },
 }
 
 func sortFieldNames() string {
@@ -273,7 +274,8 @@ func (a *API) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	snap := a.store.Snapshot()
-	matched := query.Filter(snap.Targets)
+	in := a.store.Interner()
+	matched := query.Filter(in, snap.Targets)
 
 	if field := q.Get("sort"); field != "" {
 		less, ok := sortFields[field]
@@ -286,7 +288,7 @@ func (a *API) handleSearch(w http.ResponseWriter, r *http.Request) {
 		// Sorting a copy leaves the snapshot untouched for other readers.
 		matched = slices.Clone(matched)
 		slices.SortStableFunc(matched, func(x, y *store.Entry) int {
-			c := less(x, y)
+			c := less(in, x, y)
 			if desc {
 				return -c
 			}
@@ -306,7 +308,7 @@ func (a *API) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	targets := make([]jsonTarget, 0, len(page))
 	for _, e := range page {
-		targets = append(targets, toJSON(e))
+		targets = append(targets, toJSON(in, e))
 	}
 
 	writeData(w, map[string]any{

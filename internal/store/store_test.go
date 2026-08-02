@@ -55,7 +55,7 @@ func failure(name, err string) poll.AgentResult {
 }
 
 func TestEmptyStore(t *testing.T) {
-	s := New()
+	s := New(nil)
 	snap := s.Snapshot()
 	if snap == nil {
 		t.Fatal("Snapshot returned nil before any updates")
@@ -67,7 +67,7 @@ func TestEmptyStore(t *testing.T) {
 
 func TestApplySingleAgent(t *testing.T) {
 	in := model.NewInterner()
-	s := New()
+	s := New(in)
 	s.Apply(result("a1",
 		target(in, "a1", "http://h1/metrics", map[string]string{"instance": "h1", "job": "node"}),
 		target(in, "a1", "http://h2/metrics", map[string]string{"instance": "h2", "job": "node"}),
@@ -98,7 +98,7 @@ func TestTargetScrapedByTwoAgents(t *testing.T) {
 	labels := map[string]string{"instance": "h1:9100", "job": "node"}
 	const url = "http://10.0.0.1:9100/metrics"
 
-	s := New()
+	s := New(in)
 	s.Apply(result("a1", target(in, "a1", url, labels)))
 	s.Apply(result("a2", target(in, "a2", url, labels)))
 	s.Flush()
@@ -126,7 +126,7 @@ func TestRepeatedPollDoesNotDuplicateAgent(t *testing.T) {
 	labels := map[string]string{"instance": "h1:9100"}
 	const url = "http://10.0.0.1:9100/metrics"
 
-	s := New()
+	s := New(in)
 	for range 3 {
 		s.Apply(result("a1", target(in, "a1", url, labels)))
 	}
@@ -149,7 +149,7 @@ func TestDuplicateTargetWithinOneAgent(t *testing.T) {
 	labels := map[string]string{"instance": "h1:9100"}
 	const url = "http://10.0.0.1:9100/metrics"
 
-	s := New()
+	s := New(in)
 	dup := target(in, "a1", url, labels)
 	res := result("a1", dup, dup)
 	res.Result.Dropped = []model.Target{dup}
@@ -173,7 +173,7 @@ func TestDuplicateTargetWithinOneAgent(t *testing.T) {
 // would skip and repeat rows as agents report.
 func TestTargetOrderStableAcrossRebuilds(t *testing.T) {
 	in := model.NewInterner()
-	s := New()
+	s := New(in)
 
 	var targets []model.Target
 	for i := range 20 {
@@ -210,11 +210,11 @@ func TestMergeOrderIndependent(t *testing.T) {
 	labels := map[string]string{"instance": "h1:9100"}
 	const url = "http://10.0.0.1:9100/metrics"
 
-	forward := New()
+	forward := New(nil)
 	forward.Apply(result("a1", target(in, "a1", url, labels)))
 	forward.Apply(result("a2", target(in, "a2", url, labels)))
 
-	reverse := New()
+	reverse := New(nil)
 	reverse.Apply(result("a2", target(in, "a2", url, labels)))
 	reverse.Apply(result("a1", target(in, "a1", url, labels)))
 	forward.Flush()
@@ -234,7 +234,7 @@ func TestMergeOrderIndependent(t *testing.T) {
 // Re-polling an agent replaces its targets rather than accumulating them.
 func TestApplyReplacesAgentTargets(t *testing.T) {
 	in := model.NewInterner()
-	s := New()
+	s := New(in)
 	s.Apply(result("a1",
 		target(in, "a1", "http://h1/metrics", map[string]string{"instance": "h1"}),
 		target(in, "a1", "http://h2/metrics", map[string]string{"instance": "h2"}),
@@ -254,7 +254,7 @@ func TestApplyReplacesAgentTargets(t *testing.T) {
 // A failed poll must not erase the data from that agent's last good poll.
 func TestFailedPollKeepsLastGoodData(t *testing.T) {
 	in := model.NewInterner()
-	s := New()
+	s := New(in)
 	s.Apply(result("a1", target(in, "a1", "http://h1/metrics", map[string]string{"instance": "h1"})))
 	s.Apply(failure("a1", "connection refused"))
 	s.Flush()
@@ -278,7 +278,7 @@ func TestFailedPollKeepsLastGoodData(t *testing.T) {
 // One agent failing must not affect another agent's targets.
 func TestFailureIsolatedToOneAgent(t *testing.T) {
 	in := model.NewInterner()
-	s := New()
+	s := New(in)
 	s.Apply(result("a1", target(in, "a1", "http://h1/metrics", map[string]string{"instance": "h1"})))
 	s.Apply(result("a2", target(in, "a2", "http://h2/metrics", map[string]string{"instance": "h2"})))
 	s.Apply(failure("a1", "boom"))
@@ -300,7 +300,7 @@ func TestScrapePoolsSortedAndUnique(t *testing.T) {
 		tgt.ScrapePool = pool
 		return tgt
 	}
-	s := New()
+	s := New(in)
 	s.Apply(result("a1", mk("a1", "zebra", "http://h1/m"), mk("a1", "alpha", "http://h2/m")))
 	s.Apply(result("a2", mk("a2", "alpha", "http://h3/m"), mk("a2", "middle", "http://h4/m")))
 	s.Flush()
@@ -325,7 +325,7 @@ func TestSnapshotCounts(t *testing.T) {
 	dropped := target(in, "a1", "http://h3/metrics", map[string]string{"instance": "h3"})
 	dropped.Dropped = true
 
-	s := New()
+	s := New(in)
 	res := result("a1", target(in, "a1", "http://h1/metrics", map[string]string{"instance": "h1"}), down)
 	res.Result.Dropped = []model.Target{dropped}
 	s.Apply(res)
@@ -346,7 +346,7 @@ func TestSnapshotCounts(t *testing.T) {
 // Snapshots are immutable: a reader holding one is unaffected by later polls.
 func TestSnapshotIsImmutable(t *testing.T) {
 	in := model.NewInterner()
-	s := New()
+	s := New(in)
 	s.Apply(result("a1", target(in, "a1", "http://h1/metrics", map[string]string{"instance": "h1"})))
 
 	s.Flush()
@@ -365,7 +365,7 @@ func TestSnapshotIsImmutable(t *testing.T) {
 }
 
 func TestSnapshotTakenAt(t *testing.T) {
-	s := New()
+	s := New(nil)
 	before := time.Now()
 	s.Apply(result("a1"))
 	s.Flush()
@@ -378,7 +378,7 @@ func TestSnapshotTakenAt(t *testing.T) {
 // Removing an agent from config must drop its targets from the snapshot.
 func TestRetainAgents(t *testing.T) {
 	in := model.NewInterner()
-	s := New()
+	s := New(in)
 	s.Apply(result("a1", target(in, "a1", "http://h1/metrics", map[string]string{"instance": "h1"})))
 	s.Apply(result("a2", target(in, "a2", "http://h2/metrics", map[string]string{"instance": "h2"})))
 
@@ -398,7 +398,7 @@ func TestRetainAgents(t *testing.T) {
 }
 
 func TestAgentsSortedByName(t *testing.T) {
-	s := New()
+	s := New(nil)
 	for _, n := range []string{"zulu", "alpha", "mike"} {
 		s.Apply(result(n))
 	}
@@ -414,7 +414,7 @@ func TestAgentsSortedByName(t *testing.T) {
 
 func TestConcurrentApplyAndRead(t *testing.T) {
 	in := model.NewInterner()
-	s := New()
+	s := New(in)
 
 	var wg sync.WaitGroup
 	for a := range 4 {
@@ -452,7 +452,7 @@ func TestConcurrentApplyAndRead(t *testing.T) {
 // at once must not trigger one rebuild each.
 func TestPublishIsCoalesced(t *testing.T) {
 	in := model.NewInterner()
-	s := New()
+	s := New(in)
 
 	// Hold the first rebuild open so the rest of the burst is guaranteed to
 	// arrive while one is in flight, which is the case coalescing exists for.
@@ -498,7 +498,7 @@ func TestPublishIsCoalesced(t *testing.T) {
 // settles has to include it.
 func TestCoalescedPublishEventuallyIncludesLastWrite(t *testing.T) {
 	in := model.NewInterner()
-	s := New()
+	s := New(in)
 
 	for i := range 10 {
 		url := fmt.Sprintf("http://h%02d/metrics", i)
@@ -524,7 +524,7 @@ func TestTargetOrderByLabelsWithSharedURL(t *testing.T) {
 			Labels: in.Labels(labels), Health: model.HealthUp,
 		}
 	}
-	s := New()
+	s := New(in)
 	s.Apply(result("a1",
 		mk(map[string]string{"job": "zebra"}),
 		mk(map[string]string{"job": "alpha"}),
@@ -546,8 +546,8 @@ func TestTargetOrderByLabelsWithSharedURL(t *testing.T) {
 		`job="zebra"`,
 	}
 	for i, w := range want {
-		if got[i].Labels.String() != w {
-			t.Errorf("target %d = %q, want %q", i, got[i].Labels.String(), w)
+		if got[i].Labels.String(s.Interner()) != w {
+			t.Errorf("target %d = %q, want %q", i, got[i].Labels.String(s.Interner()), w)
 		}
 	}
 }
@@ -569,7 +569,7 @@ func TestAgentsDisagreeOnHealth(t *testing.T) {
 	}
 	now := time.Now()
 
-	s := New()
+	s := New(in)
 	s.Apply(poll.AgentResult{
 		Result: &poll.Result{Active: []model.Target{mk("agentA", model.HealthUp, now, "")}},
 		Status: model.AgentStatus{Name: "agentA"},
@@ -611,7 +611,7 @@ func TestAgentsAgreeNotDisputed(t *testing.T) {
 			Labels: in.Labels(labels), Health: model.HealthUp,
 		}
 	}
-	s := New()
+	s := New(in)
 	s.Apply(result("agentA", mk("agentA")))
 	s.Apply(result("agentB", mk("agentB")))
 	s.Flush()
@@ -628,7 +628,7 @@ func TestAgentsAgreeNotDisputed(t *testing.T) {
 // A single agent can never disagree with itself.
 func TestSingleAgentNeverDisputed(t *testing.T) {
 	in := model.NewInterner()
-	s := New()
+	s := New(in)
 	s.Apply(result("a1", target(in, "a1", "http://h/m", map[string]string{"instance": "h"})))
 	s.Flush()
 

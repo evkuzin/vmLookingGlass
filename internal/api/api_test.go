@@ -50,7 +50,7 @@ func result(name string, active ...model.Target) poll.AgentResult {
 // testServer builds a handler over a store seeded with two agents.
 func testServer(t *testing.T) (*store.Store, http.Handler) {
 	t.Helper()
-	s := store.New()
+	s := store.New(in)
 	s.Apply(result("agent01",
 		target("agent01", "pool-a", "http://h1:9100/metrics", map[string]string{"instance": "h1:9100", "job": "node"}),
 		target("agent01", "pool-b", "http://h2:9100/metrics", map[string]string{"instance": "h2:9100", "job": "redis"}),
@@ -115,7 +115,7 @@ func TestTargetsPrometheusShape(t *testing.T) {
 
 // A target reported by several agents appears once, listing all of them.
 func TestTargetsMergedAcrossAgents(t *testing.T) {
-	s := store.New()
+	s := store.New(in)
 	labels := map[string]string{"instance": "shared:9100", "job": "node"}
 	const url = "http://shared:9100/metrics"
 	s.Apply(result("agent01", target("agent01", "pool-a", url, labels)))
@@ -140,7 +140,7 @@ func TestTargetsMergedAcrossAgents(t *testing.T) {
 }
 
 func TestTargetsStateFilter(t *testing.T) {
-	s := store.New()
+	s := store.New(in)
 	dropped := target("agent01", "pool-a", "http://h9:9100/metrics", map[string]string{"instance": "h9"})
 	dropped.Dropped = true
 	res := result("agent01", target("agent01", "pool-a", "http://h1:9100/metrics", map[string]string{"instance": "h1"}))
@@ -190,7 +190,7 @@ func TestTargetsScrapePoolFilter(t *testing.T) {
 }
 
 func TestDroppedTargetCounts(t *testing.T) {
-	s := store.New()
+	s := store.New(in)
 	d1 := target("agent01", "pool-a", "http://h8/metrics", map[string]string{"instance": "h8"})
 	d1.Dropped = true
 	d2 := target("agent01", "pool-b", "http://h9/metrics", map[string]string{"instance": "h9"})
@@ -248,7 +248,7 @@ func TestSearchMultipleFilters(t *testing.T) {
 }
 
 func TestSearchPagination(t *testing.T) {
-	s := store.New()
+	s := store.New(in)
 	var targets []model.Target
 	for i := range 25 {
 		url := fmt.Sprintf("http://h%02d:9100/metrics", i)
@@ -280,7 +280,7 @@ func TestSearchPagination(t *testing.T) {
 }
 
 func TestSearchDefaultLimit(t *testing.T) {
-	s := store.New()
+	s := store.New(in)
 	var targets []model.Target
 	for i := range defaultSearchLimit + 50 {
 		url := fmt.Sprintf("http://h%04d:9100/metrics", i)
@@ -345,7 +345,7 @@ func TestAgentsEndpoint(t *testing.T) {
 }
 
 func TestAgentsReportsFailure(t *testing.T) {
-	s := store.New()
+	s := store.New(in)
 	s.Apply(poll.AgentResult{Status: model.AgentStatus{
 		Name: "broken", URL: "http://broken:8429",
 		LastPoll: time.Now(), Interval: time.Minute, Err: "connection refused",
@@ -407,7 +407,7 @@ func TestPprofDisabledByDefault(t *testing.T) {
 }
 
 func TestPprofEnabled(t *testing.T) {
-	s := store.New()
+	s := store.New(in)
 	h := New(s, discardLogger()).WithPprof().Handler()
 
 	for _, path := range []string{"/debug/pprof/", "/debug/pprof/cmdline"} {
@@ -430,7 +430,7 @@ func TestPprofEnabled(t *testing.T) {
 // The agents endpoint carries recent poll outcomes so the UI can draw an
 // availability bar without a time-series backend.
 func TestAgentsIncludeHistory(t *testing.T) {
-	s := store.New()
+	s := store.New(in)
 	now := time.Now()
 	ok := result("agent01")
 	ok.Status.LastPoll = now.Add(-2 * time.Minute)
@@ -462,7 +462,7 @@ func TestAgentsIncludeHistory(t *testing.T) {
 // Sorting has to happen before paging, or a sorted page shows the order of
 // whichever rows the offset happened to land on rather than the real extremes.
 func TestSearchSortAppliesBeforePaging(t *testing.T) {
-	s := store.New()
+	s := store.New(in)
 	var targets []model.Target
 	for i := range 30 {
 		tgt := target("agent01", "pool-a",
@@ -490,7 +490,7 @@ func TestSearchSortAppliesBeforePaging(t *testing.T) {
 }
 
 func TestSearchSortAscending(t *testing.T) {
-	s := store.New()
+	s := store.New(in)
 	var targets []model.Target
 	for i := range 10 {
 		tgt := target("agent01", "pool-a",

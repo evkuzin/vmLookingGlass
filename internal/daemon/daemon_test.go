@@ -177,7 +177,7 @@ func TestReloadChangedAgentURL(t *testing.T) {
 	deadline := time.After(5 * time.Second)
 	for {
 		targets := d.Store().Snapshot().Targets
-		if len(targets) == 1 && targets[0].Labels.Get("instance") == "h2" {
+		if len(targets) == 1 && targets[0].Labels.Get(d.Store().Interner(), "instance") == "h2" {
 			return
 		}
 		select {

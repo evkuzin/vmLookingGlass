@@ -113,6 +113,10 @@ type agentData struct {
 // Agents report independently, so the store keeps each agent's last good data
 // and rebuilds the snapshot whenever any of them reports.
 type Store struct {
+	// interner resolves label indices. Sorting and formatting need the text
+	// behind a label, which the indices alone do not carry.
+	interner *model.Interner
+
 	mu     sync.Mutex
 	agents map[string]*agentData
 
@@ -131,10 +135,16 @@ type Store struct {
 	onPublish func()
 }
 
-func New() *Store {
+// New returns a store resolving labels through in. Passing nil creates a
+// private interner, which suits tests that build targets themselves.
+func New(in *model.Interner) *Store {
+	if in == nil {
+		in = model.NewInterner()
+	}
 	s := &Store{
-		agents:  make(map[string]*agentData),
-		settled: make(chan struct{}),
+		interner: in,
+		agents:   make(map[string]*agentData),
+		settled:  make(chan struct{}),
 	}
 	s.current.Store(&Snapshot{TakenAt: time.Now(), byAgent: map[string]int{}})
 	return s
@@ -142,6 +152,9 @@ func New() *Store {
 
 // Snapshot returns the current view. Safe for concurrent use and never nil.
 func (s *Store) Snapshot() *Snapshot { return s.current.Load() }
+
+// Interner returns the interner label indices resolve against.
+func (s *Store) Interner() *model.Interner { return s.interner }
 
 // Apply records one agent's poll result and republishes the snapshot.
 //
@@ -324,7 +337,7 @@ func (s *Store) publish() {
 	}
 	// Sorted by identity so snapshot order is stable between rebuilds and
 	// pagination stays consistent across requests.
-	slices.SortFunc(snap.Targets, compareEntries)
+	slices.SortFunc(snap.Targets, func(a, b *Entry) int { return compareEntries(s.interner, a, b) })
 
 	snap.ScrapePools = make([]string, 0, len(pools))
 	for p := range pools {
@@ -376,15 +389,17 @@ func merge(byKey map[model.TargetKey]*Entry, tgt *model.Target, agent string) {
 // Labels are compared pair by pair rather than by formatting each set into a
 // string: the comparator runs O(n log n) times over the whole fleet, and
 // building a string per call dominated the rebuild.
-func compareEntries(a, b *Entry) int {
+func compareEntries(in *model.Interner, a, b *Entry) int {
 	if c := strings.Compare(a.ScrapeURL, b.ScrapeURL); c != 0 {
 		return c
 	}
+	// Labels compare by text, not by index: indices reflect the order strings
+	// were first seen, which would make ordering depend on poll timing.
 	for i := 0; i < len(a.Labels) && i < len(b.Labels); i++ {
-		if c := strings.Compare(a.Labels[i].Name, b.Labels[i].Name); c != 0 {
+		if c := strings.Compare(in.Name(a.Labels[i]), in.Name(b.Labels[i])); c != 0 {
 			return c
 		}
-		if c := strings.Compare(a.Labels[i].Value, b.Labels[i].Value); c != 0 {
+		if c := strings.Compare(in.Value(a.Labels[i]), in.Value(b.Labels[i])); c != 0 {
 			return c
 		}
 	}

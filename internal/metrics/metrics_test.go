@@ -14,6 +14,10 @@ import (
 	"github.com/evkuzin/vmLookingGlass/internal/store"
 )
 
+// One interner for the package: labels are indices into whichever interner
+// produced them, so the store and the collector have to share it.
+var in = model.NewInterner()
+
 func scrape(t *testing.T, m *Metrics) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
@@ -92,7 +96,7 @@ func failResult(name, err string) poll.AgentResult {
 }
 
 func TestPollCountersByOutcome(t *testing.T) {
-	m := New(prometheus.NewRegistry(), store.New(), model.NewInterner())
+	m := New(prometheus.NewRegistry(), store.New(in), in)
 
 	m.RecordPoll(okResult("agent01", 5, 5, 0, 1))
 	m.RecordPoll(okResult("agent01", 5, 5, 0, 1))
@@ -110,7 +114,7 @@ func TestPollCountersByOutcome(t *testing.T) {
 }
 
 func TestPollDurationRecorded(t *testing.T) {
-	m := New(prometheus.NewRegistry(), store.New(), model.NewInterner())
+	m := New(prometheus.NewRegistry(), store.New(in), in)
 	m.RecordPoll(okResult("agent01", 1, 1, 0, 0))
 
 	body := scrape(t, m)
@@ -122,11 +126,11 @@ func TestPollDurationRecorded(t *testing.T) {
 // Per-agent gauges let an operator alert on one agent going away, which a
 // fleet-wide total would hide.
 func TestPerAgentGauges(t *testing.T) {
-	s := store.New()
+	s := store.New(in)
 	s.Apply(okResult("agent01", 5, 4, 1, 2))
 	s.Apply(failResult("agent02", "boom"))
 	s.Flush()
-	m := New(prometheus.NewRegistry(), s, model.NewInterner())
+	m := New(prometheus.NewRegistry(), s, in)
 
 	body := scrape(t, m)
 
@@ -145,10 +149,10 @@ func TestPerAgentGauges(t *testing.T) {
 }
 
 func TestPerAgentUpDownGauges(t *testing.T) {
-	s := store.New()
+	s := store.New(in)
 	s.Apply(okResult("agent01", 10, 8, 2, 0))
 	s.Flush()
-	m := New(prometheus.NewRegistry(), s, model.NewInterner())
+	m := New(prometheus.NewRegistry(), s, in)
 
 	body := scrape(t, m)
 	if got := sampleValue(t, body, "vmlookingglass_agent_up_targets", `agent="agent01"`); got != "8" {
@@ -162,14 +166,14 @@ func TestPerAgentUpDownGauges(t *testing.T) {
 // The truncation flag comes from the poll, which compares the dropped count
 // against the cap read from that agent's own flags.
 func TestDroppedTruncatedFlag(t *testing.T) {
-	s := store.New()
+	s := store.New(in)
 	s.Apply(okResult("normal", 5, 5, 0, 42))
 	capped := okResult("capped", 5, 5, 0, 10000)
 	capped.Status.MaxDroppedTargets = 10000
 	capped.Status.DroppedTruncated = true
 	s.Apply(capped)
 	s.Flush()
-	m := New(prometheus.NewRegistry(), s, model.NewInterner())
+	m := New(prometheus.NewRegistry(), s, in)
 
 	body := scrape(t, m)
 	if got := sampleValue(t, body, "vmlookingglass_agent_dropped_truncated", `agent="normal"`); got != "0" {
@@ -182,7 +186,7 @@ func TestDroppedTruncatedFlag(t *testing.T) {
 
 func TestSnapshotGauges(t *testing.T) {
 	in := model.NewInterner()
-	s := store.New()
+	s := store.New(in)
 
 	tgt := func(agent, url string) model.Target {
 		return model.Target{
@@ -219,7 +223,7 @@ func TestSnapshotGauges(t *testing.T) {
 func TestInternerGauge(t *testing.T) {
 	in := model.NewInterner()
 	in.Labels(map[string]string{"a": "1", "b": "2"})
-	m := New(prometheus.NewRegistry(), store.New(), in)
+	m := New(prometheus.NewRegistry(), store.New(in), in)
 
 	if got := sampleValue(t, scrape(t, m), "vmlookingglass_interned_strings"); got != "4" {
 		t.Errorf("interned strings = %s, want 4", got)
@@ -229,11 +233,11 @@ func TestInternerGauge(t *testing.T) {
 // A removed agent must stop being exported, or dashboards keep showing an
 // agent that is no longer configured.
 func TestRemovedAgentGaugesDisappear(t *testing.T) {
-	s := store.New()
+	s := store.New(in)
 	s.Apply(okResult("agent01", 5, 5, 0, 0))
 	s.Apply(okResult("agent02", 3, 3, 0, 0))
 	s.Flush()
-	m := New(prometheus.NewRegistry(), s, model.NewInterner())
+	m := New(prometheus.NewRegistry(), s, in)
 
 	if body := scrape(t, m); !hasSample(body, "vmlookingglass_agent_up", `agent="agent02"`) {
 		t.Fatalf("agent02 missing before removal:\n%s", body)
@@ -252,12 +256,12 @@ func TestRemovedAgentGaugesDisappear(t *testing.T) {
 }
 
 func TestStaleAgentReported(t *testing.T) {
-	s := store.New()
+	s := store.New(in)
 	stale := okResult("agent01", 1, 1, 0, 0)
 	stale.Status.LastSuccess = time.Now().Add(-10 * time.Minute)
 	s.Apply(stale)
 	s.Flush()
-	m := New(prometheus.NewRegistry(), s, model.NewInterner())
+	m := New(prometheus.NewRegistry(), s, in)
 
 	if got := sampleValue(t, scrape(t, m), "vmlookingglass_agent_stale", `agent="agent01"`); got != "1" {
 		t.Errorf("stale = %s, want 1", got)
@@ -265,7 +269,7 @@ func TestStaleAgentReported(t *testing.T) {
 }
 
 func TestGoAndProcessCollectorsRegistered(t *testing.T) {
-	m := New(prometheus.NewRegistry(), store.New(), model.NewInterner())
+	m := New(prometheus.NewRegistry(), store.New(in), in)
 	body := scrape(t, m)
 
 	for _, want := range []string{"go_goroutines", "go_memstats_alloc_bytes"} {
@@ -276,10 +280,10 @@ func TestGoAndProcessCollectorsRegistered(t *testing.T) {
 }
 
 func TestExpositionIsWellFormed(t *testing.T) {
-	s := store.New()
+	s := store.New(in)
 	s.Apply(okResult("agent01", 5, 4, 1, 2))
 	s.Flush()
-	m := New(prometheus.NewRegistry(), s, model.NewInterner())
+	m := New(prometheus.NewRegistry(), s, in)
 	m.RecordPoll(okResult("agent01", 5, 4, 1, 2))
 
 	body := scrape(t, m)

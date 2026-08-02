@@ -65,11 +65,12 @@ func concurrencyLimit(configured int) int {
 }
 
 func New(log *slog.Logger) *Daemon {
+	interner := model.NewInterner()
 	d := &Daemon{
 		log:      log,
-		store:    store.New(),
+		store:    store.New(interner),
 		poller:   poll.New(log),
-		interner: model.NewInterner(),
+		interner: interner,
 		running:  make(map[string]*agentTask),
 		limiter:  poll.NewLimiter(defaultConcurrency()),
 	}

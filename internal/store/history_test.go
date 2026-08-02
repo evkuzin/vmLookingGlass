@@ -19,7 +19,7 @@ func pollAt(name string, ts time.Time, ok bool) poll.AgentResult {
 }
 
 func TestHistoryRecordsOutcomes(t *testing.T) {
-	s := New()
+	s := New(nil)
 	now := time.Now()
 	s.Apply(pollAt("a1", now.Add(-3*time.Minute), true))
 	s.Apply(pollAt("a1", now.Add(-2*time.Minute), false))
@@ -42,7 +42,7 @@ func TestHistoryRecordsOutcomes(t *testing.T) {
 // Only the recent window is kept: the bar covers a fixed span and unbounded
 // history would grow without limit.
 func TestHistoryDropsEntriesOutsideWindow(t *testing.T) {
-	s := New()
+	s := New(nil)
 	now := time.Now()
 	s.Apply(pollAt("a1", now.Add(-13*time.Hour), true))
 	s.Apply(pollAt("a1", now.Add(-11*time.Hour), true))
@@ -63,7 +63,7 @@ func TestHistoryDropsEntriesOutsideWindow(t *testing.T) {
 // A busy fleet polls often, so the per-agent history has to stay bounded even
 // within the window.
 func TestHistoryIsBounded(t *testing.T) {
-	s := New()
+	s := New(nil)
 	now := time.Now()
 	for i := range HistoryLimit * 2 {
 		s.Apply(pollAt("a1", now.Add(-time.Duration(HistoryLimit*2-i)*time.Second), true))
@@ -76,7 +76,7 @@ func TestHistoryIsBounded(t *testing.T) {
 }
 
 func TestHistoryPerAgent(t *testing.T) {
-	s := New()
+	s := New(nil)
 	now := time.Now()
 	s.Apply(pollAt("a1", now, true))
 	s.Apply(pollAt("a2", now, false))
@@ -96,7 +96,7 @@ func TestHistoryPerAgent(t *testing.T) {
 
 // An agent removed from the config must not keep its history around.
 func TestHistoryDroppedWithAgent(t *testing.T) {
-	s := New()
+	s := New(nil)
 	s.Apply(pollAt("a1", time.Now(), true))
 	s.Apply(pollAt("a2", time.Now(), true))
 	s.Flush()

@@ -54,17 +54,17 @@ func TestInternLabels(t *testing.T) {
 	l1 := in.Labels(map[string]string{"job": "node", "env": "prod"})
 	l2 := in.Labels(map[string]string{"job": "node", "env": "prod"})
 
-	if l1.Get("job") != "node" || l1.Get("env") != "prod" {
+	if l1.Get(in, "job") != "node" || l1.Get(in, "env") != "prod" {
 		t.Fatalf("labels not preserved: %v", l1)
 	}
-	if l1.Get("missing") != "" {
+	if l1.Get(in, "missing") != "" {
 		t.Error("Get on absent key should return empty string")
 	}
 	// 2 names + 2 values, shared across both calls.
 	if got := in.Len(); got != 4 {
 		t.Errorf("Len = %d, want 4 unique strings across both label sets", got)
 	}
-	if !sameBacking(l1.Get("job"), l2.Get("job")) {
+	if !sameBacking(l1.Get(in, "job"), l2.Get(in, "job")) {
 		t.Error("equal label values across sets do not share backing")
 	}
 }
@@ -78,13 +78,13 @@ func TestLabelsSortedAndEqual(t *testing.T) {
 	if !a.Equal(b) {
 		t.Error("label sets with equal content compare unequal")
 	}
-	if a.String() != b.String() {
-		t.Errorf("String() differs by insertion order:\n %q\n %q", a.String(), b.String())
+	if a.String(in) != b.String(in) {
+		t.Errorf("String() differs by insertion order:\n %q\n %q", a.String(in), b.String(in))
 	}
 	// Sorted order makes String() and Equal() order-independent.
 	want := `a="2", m="3", z="1"`
-	if a.String() != want {
-		t.Errorf("String() = %q, want %q", a.String(), want)
+	if a.String(in) != want {
+		t.Errorf("String() = %q, want %q", a.String(in), want)
 	}
 }
 

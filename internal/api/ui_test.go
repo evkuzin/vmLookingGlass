@@ -18,7 +18,7 @@ func stubUI() http.Handler {
 
 // API routes must win over the UI, or the UI's catch-all would swallow them.
 func TestUIDoesNotShadowAPI(t *testing.T) {
-	s := store.New()
+	s := store.New(nil)
 	h := New(s, discardLogger()).WithUI(stubUI()).Handler()
 
 	for _, path := range []string{"/api/v1/targets", "/api/v1/agents", "/api/v1/scrape_pools", "/-/healthy"} {
@@ -34,7 +34,7 @@ func TestUIDoesNotShadowAPI(t *testing.T) {
 }
 
 func TestUIServedAtRoot(t *testing.T) {
-	s := store.New()
+	s := store.New(nil)
 	h := New(s, discardLogger()).WithUI(stubUI()).Handler()
 
 	rec := httptest.NewRecorder()
@@ -60,7 +60,7 @@ func TestRootWithoutUI(t *testing.T) {
 // An unknown API path must stay a 404 rather than falling through to the UI,
 // so a mistyped endpoint is not answered with HTML.
 func TestUnknownAPIPathNotServedByUI(t *testing.T) {
-	s := store.New()
+	s := store.New(nil)
 	h := New(s, discardLogger()).WithUI(stubUI()).Handler()
 
 	rec := httptest.NewRecorder()

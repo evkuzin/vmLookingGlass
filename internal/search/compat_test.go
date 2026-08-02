@@ -14,7 +14,9 @@ import (
 // Expected values were produced by running the same filters through that
 // tool's matcher.
 func compatTargets() []*store.Entry {
-	i := model.NewInterner()
+	// The package interner: labels resolve only against the one that made
+	// them, and matching uses this one.
+	i := in
 	mk := func(labels map[string]string, pool, health string, dur float64, samples int64) *store.Entry {
 		return &store.Entry{
 			Target: model.Target{
@@ -78,7 +80,7 @@ func TestFilterCompatibility(t *testing.T) {
 				t.Fatalf("Parse: %v", err)
 			}
 			for i, want := range tc.want {
-				if got := q.Match(targets[i]); got != want {
+				if got := q.Match(in, targets[i]); got != want {
 					t.Errorf("target %d: got %v, want %v", i, got, want)
 				}
 			}

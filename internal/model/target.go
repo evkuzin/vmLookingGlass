@@ -80,9 +80,15 @@ func (t *Target) Key() TargetKey {
 	}
 
 	writeLenPrefixed(&h, t.ScrapeURL)
+	// Labels hash as their interner indices: equal indices mean equal strings,
+	// so this is both cheaper and free of the ambiguity that concatenating
+	// text would introduce.
+	var buf [4]byte
 	for _, l := range labels {
-		writeLenPrefixed(&h, l.Name)
-		writeLenPrefixed(&h, l.Value)
+		binary.LittleEndian.PutUint32(buf[:], l.Name)
+		_, _ = h.Write(buf[:])
+		binary.LittleEndian.PutUint32(buf[:], l.Value)
+		_, _ = h.Write(buf[:])
 	}
 	return TargetKey(h.Sum64())
 }
@@ -98,10 +104,10 @@ func writeLenPrefixed(h *maphash.Hash, s string) {
 func (t *Target) IsUp() bool { return t.Health == HealthUp }
 
 // Instance returns the instance label, the usual human-facing target name.
-func (t *Target) Instance() string { return t.Labels.Get(LabelInstance) }
+func (t *Target) Instance(in *Interner) string { return t.Labels.Get(in, LabelInstance) }
 
 // Job returns the job label.
-func (t *Target) Job() string { return t.Labels.Get(LabelJob) }
+func (t *Target) Job(in *Interner) string { return t.Labels.Get(in, LabelJob) }
 
 // AgentStatus is the outcome of the most recent poll of one agent.
 type AgentStatus struct {

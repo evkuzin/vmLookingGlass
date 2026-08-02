@@ -32,9 +32,12 @@ type Row struct {
 	Duration   float64
 	Samples    int64
 	Multi      bool
+	Disputed   bool
 
 	Labels           map[string]string
 	DiscoveredLabels map[string]string
+	// HealthByAgent is populated only when the agents disagree.
+	HealthByAgent map[string]string
 }
 
 // column is a named accessor, so -columns and the default table share one
@@ -55,6 +58,7 @@ var columns = []column{
 	{"duration", func(r *Row) string { return fmt.Sprintf("%.3f", r.Duration) }},
 	{"samples", func(r *Row) string { return fmt.Sprintf("%d", r.Samples) }},
 	{"multi", func(r *Row) string { return fmt.Sprintf("%t", r.Multi) }},
+	{"disputed", func(r *Row) string { return fmt.Sprintf("%t", r.Disputed) }},
 }
 
 var defaultColumns = []string{"instance", "job", "pool", "health", "agents"}
@@ -76,10 +80,19 @@ func columnNames() string {
 	return strings.Join(names, ", ")
 }
 
+// filterList collects a repeatable -filter flag.
+type filterList []string
+
+func (f *filterList) String() string     { return strings.Join(*f, " ") }
+func (f *filterList) Set(v string) error { *f = append(*f, v); return nil }
+
 // Run executes the command with the given arguments, writing to out.
 func Run(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("vmlg", flag.ContinueOnError)
 	fs.SetOutput(out)
+
+	filters := filterList{}
+	fs.Var(&filters, "filter", "filter expression; repeatable, also accepted positionally")
 
 	addr := fs.String("addr", "http://localhost:8880", "vmlookingglass address")
 	format := fs.String("o", "table", "output format: table, json or csv")
@@ -113,7 +126,13 @@ func Run(args []string, out io.Writer) error {
 	if *agents {
 		return runAgents(client, base, out)
 	}
-	return runSearch(client, base, fs.Args(), *format, *cols, *tmpl, *noHeader, *limit, *offset, out)
+	// Flag and positional filters combine, so a filter can go anywhere on
+	// the command line.
+	all := make([]string, 0, len(filters)+len(fs.Args()))
+	all = append(all, filters...)
+	all = append(all, fs.Args()...)
+	return runSearch(client, base, all,
+		*format, *cols, *tmpl, *noHeader, *limit, *offset, out)
 }
 
 func runSearch(client *http.Client, base string, filters []string,
@@ -141,6 +160,8 @@ func runSearch(client *http.Client, base string, filters []string,
 			LastSamplesScraped int64             `json:"lastSamplesScraped"`
 			Agents             []string          `json:"agents"`
 			MultiScraped       bool              `json:"multiScraped"`
+			Disputed           bool              `json:"disputed"`
+			HealthByAgent      map[string]string `json:"healthByAgent"`
 		} `json:"targets"`
 		Total     int  `json:"total"`
 		Truncated bool `json:"truncated"`
@@ -173,6 +194,8 @@ func runSearch(client *http.Client, base string, filters []string,
 			Duration:         t.LastScrapeDuration,
 			Samples:          t.LastSamplesScraped,
 			Multi:            t.MultiScraped,
+			Disputed:         t.Disputed,
+			HealthByAgent:    t.HealthByAgent,
 			Labels:           t.Labels,
 			DiscoveredLabels: t.DiscoveredLabels,
 		})

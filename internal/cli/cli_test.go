@@ -400,3 +400,62 @@ func TestDroppedTargetShowsDiscoveredAddress(t *testing.T) {
 		t.Errorf("dropped target job not filled from discovered labels:\n%s", out)
 	}
 }
+
+// Filters are accepted as repeated flags as well as positionally, so they can
+// be placed anywhere on the command line.
+func TestFilterFlag(t *testing.T) {
+	stub := newSearchStub(t, nil, 0)
+
+	if _, err := run(t, stub.URL, "-filter", "health=down", "-filter", "labels.job=node"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got := stub.lastQuery["filter"]
+	if len(got) != 2 || got[0] != "health=down" || got[1] != "labels.job=node" {
+		t.Errorf("filter params = %v, want both flags forwarded", got)
+	}
+}
+
+// Flag and positional filters combine rather than one replacing the other.
+func TestFilterFlagAndPositional(t *testing.T) {
+	stub := newSearchStub(t, nil, 0)
+
+	if _, err := run(t, stub.URL, "-filter", "health=down", "labels.job=node"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got := stub.lastQuery["filter"]
+	if len(got) != 2 {
+		t.Fatalf("filter params = %v, want both", got)
+	}
+}
+
+// A target its agents disagree about must be visible as such, not shown with
+// whichever health arrived last.
+func TestDisputedTargetShown(t *testing.T) {
+	tgt := target("h1:9100", "down", "agentA", "agentB")
+	tgt["disputed"] = true
+	tgt["healthByAgent"] = map[string]any{"agentA": "up", "agentB": "down"}
+	stub := newSearchStub(t, []map[string]any{tgt}, 1)
+
+	out, err := run(t, stub.URL, "-columns", "instance,health,disputed")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out, "true") {
+		t.Errorf("disputed column not shown:\n%s", out)
+	}
+}
+
+func TestDisputedInTemplate(t *testing.T) {
+	tgt := target("h1:9100", "down", "agentA", "agentB")
+	tgt["disputed"] = true
+	tgt["healthByAgent"] = map[string]any{"agentA": "up", "agentB": "down"}
+	stub := newSearchStub(t, []map[string]any{tgt}, 1)
+
+	out, err := run(t, stub.URL, "-template", `{{.Instance}} {{index .HealthByAgent "agentA"}}`)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out, "up") {
+		t.Errorf("per-agent health not reachable from a template:\n%s", out)
+	}
+}

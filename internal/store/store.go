@@ -4,6 +4,7 @@ package store
 import (
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -251,12 +252,7 @@ func (s *Store) publish() {
 	}
 	// Sorted by identity so snapshot order is stable between rebuilds and
 	// pagination stays consistent across requests.
-	slices.SortFunc(snap.Targets, func(a, b *Entry) int {
-		if a.ScrapeURL != b.ScrapeURL {
-			return cmpString(a.ScrapeURL, b.ScrapeURL)
-		}
-		return cmpString(a.Labels.String(), b.Labels.String())
-	})
+	slices.SortFunc(snap.Targets, compareEntries)
 
 	snap.ScrapePools = make([]string, 0, len(pools))
 	for p := range pools {
@@ -289,13 +285,23 @@ func merge(byKey map[model.TargetKey]*Entry, tgt *model.Target, agent string) {
 	}
 }
 
-func cmpString(a, b string) int {
-	switch {
-	case a < b:
-		return -1
-	case a > b:
-		return 1
-	default:
-		return 0
+// compareEntries orders targets by scrape URL, then by label content.
+//
+// Labels are compared pair by pair rather than by formatting each set into a
+// string: the comparator runs O(n log n) times over the whole fleet, and
+// building a string per call dominated the rebuild.
+func compareEntries(a, b *Entry) int {
+	if c := strings.Compare(a.ScrapeURL, b.ScrapeURL); c != 0 {
+		return c
 	}
+	for i := 0; i < len(a.Labels) && i < len(b.Labels); i++ {
+		if c := strings.Compare(a.Labels[i].Name, b.Labels[i].Name); c != 0 {
+			return c
+		}
+		if c := strings.Compare(a.Labels[i].Value, b.Labels[i].Value); c != 0 {
+			return c
+		}
+	}
+	// One set is a prefix of the other, so the shorter sorts first.
+	return len(a.Labels) - len(b.Labels)
 }

@@ -511,3 +511,43 @@ func TestCoalescedPublishEventuallyIncludesLastWrite(t *testing.T) {
 		t.Errorf("targets = %d, want the last write's single target", got)
 	}
 }
+
+// Targets sharing a scrape URL are ordered by their labels, and that order
+// must be total and stable so paging does not skip or repeat rows.
+func TestTargetOrderByLabelsWithSharedURL(t *testing.T) {
+	in := model.NewInterner()
+	const url = "http://h:9100/metrics"
+
+	mk := func(labels map[string]string) model.Target {
+		return model.Target{
+			Agent: "a1", ScrapePool: "p", ScrapeURL: url,
+			Labels: in.Labels(labels), Health: model.HealthUp,
+		}
+	}
+	s := New()
+	s.Apply(result("a1",
+		mk(map[string]string{"job": "zebra"}),
+		mk(map[string]string{"job": "alpha"}),
+		mk(map[string]string{"job": "alpha", "env": "prod"}),
+		mk(map[string]string{"job": "middle"}),
+	))
+	s.Flush()
+
+	got := s.Snapshot().Targets
+	if len(got) != 4 {
+		t.Fatalf("targets = %d, want 4 distinct label sets", len(got))
+	}
+	// Sorting by label content: env=prod sorts before the bare job labels
+	// because its first label name is "env".
+	want := []string{
+		`env="prod", job="alpha"`,
+		`job="alpha"`,
+		`job="middle"`,
+		`job="zebra"`,
+	}
+	for i, w := range want {
+		if got[i].Labels.String() != w {
+			t.Errorf("target %d = %q, want %q", i, got[i].Labels.String(), w)
+		}
+	}
+}

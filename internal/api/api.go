@@ -2,13 +2,18 @@
 package api
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/evkuzin/vmLookingGlass/internal/model"
 	"github.com/evkuzin/vmLookingGlass/internal/search"
 	"github.com/evkuzin/vmLookingGlass/internal/store"
 )
@@ -213,6 +218,40 @@ func (a *API) handleScrapePools(w http.ResponseWriter, r *http.Request) {
 	writeData(w, map[string]any{"scrapePools": pools})
 }
 
+// sortFields are the orderings the search endpoint accepts. Sorting happens
+// server-side because results are paged: ordering only the returned page
+// would rank it against itself rather than against the whole match set.
+var sortFields = map[string]func(a, b *store.Entry) int{
+	model.LabelInstance: func(a, b *store.Entry) int {
+		return strings.Compare(a.Instance(), b.Instance())
+	},
+	model.LabelJob: func(a, b *store.Entry) int {
+		return strings.Compare(a.Job(), b.Job())
+	},
+	"pool":   func(a, b *store.Entry) int { return strings.Compare(a.ScrapePool, b.ScrapePool) },
+	"health": func(a, b *store.Entry) int { return strings.Compare(a.Health, b.Health) },
+	"url":    func(a, b *store.Entry) int { return strings.Compare(a.ScrapeURL, b.ScrapeURL) },
+	"lastScrape": func(a, b *store.Entry) int {
+		return a.LastScrape.Compare(b.LastScrape)
+	},
+	"duration": func(a, b *store.Entry) int {
+		return cmp.Compare(a.LastScrapeDuration, b.LastScrapeDuration)
+	},
+	"samples": func(a, b *store.Entry) int {
+		return cmp.Compare(a.LastSamplesScraped, b.LastSamplesScraped)
+	},
+	"agents": func(a, b *store.Entry) int { return cmp.Compare(len(a.Agents), len(b.Agents)) },
+}
+
+func sortFieldNames() string {
+	names := make([]string, 0, len(sortFields))
+	for k := range sortFields {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
 // handleSearch filters targets and returns a bounded page of results.
 func (a *API) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -235,6 +274,25 @@ func (a *API) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	snap := a.store.Snapshot()
 	matched := query.Filter(snap.Targets)
+
+	if field := q.Get("sort"); field != "" {
+		less, ok := sortFields[field]
+		if !ok {
+			writeError(w, http.StatusBadRequest,
+				"unknown sort field %q: available are %s", field, sortFieldNames())
+			return
+		}
+		desc := q.Get("order") == "desc"
+		// Sorting a copy leaves the snapshot untouched for other readers.
+		matched = slices.Clone(matched)
+		slices.SortStableFunc(matched, func(x, y *store.Entry) int {
+			c := less(x, y)
+			if desc {
+				return -c
+			}
+			return c
+		})
+	}
 
 	page := matched
 	if offset < len(page) {

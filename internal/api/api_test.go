@@ -458,3 +458,80 @@ func TestAgentsIncludeHistory(t *testing.T) {
 		t.Errorf("second poll ok = %v, want false", second["ok"])
 	}
 }
+
+// Sorting has to happen before paging, or a sorted page shows the order of
+// whichever rows the offset happened to land on rather than the real extremes.
+func TestSearchSortAppliesBeforePaging(t *testing.T) {
+	s := store.New()
+	var targets []model.Target
+	for i := range 30 {
+		tgt := target("agent01", "pool-a",
+			fmt.Sprintf("http://h%02d:9100/metrics", i),
+			map[string]string{"instance": fmt.Sprintf("h%02d:9100", i)})
+		// Later hosts scrape more samples, so the maximum is on the last page
+		// in the default order.
+		tgt.LastSamplesScraped = int64(i)
+		targets = append(targets, tgt)
+	}
+	s.Apply(result("agent01", targets...))
+	s.Flush()
+	h := New(s, discardLogger()).Handler()
+
+	_, body := get(t, h, "/api/v1/search?sort=samples&order=desc&limit=3")
+	got := body["data"].(map[string]any)["targets"].([]any)
+	if len(got) != 3 {
+		t.Fatalf("returned %d targets, want 3", len(got))
+	}
+	first := got[0].(map[string]any)
+	if first["lastSamplesScraped"] != float64(29) {
+		t.Errorf("top row samples = %v, want the fleet maximum 29",
+			first["lastSamplesScraped"])
+	}
+}
+
+func TestSearchSortAscending(t *testing.T) {
+	s := store.New()
+	var targets []model.Target
+	for i := range 10 {
+		tgt := target("agent01", "pool-a",
+			fmt.Sprintf("http://h%02d:9100/metrics", i), map[string]string{"instance": fmt.Sprintf("h%02d", i)})
+		tgt.LastScrapeDuration = float64(10-i) / 10
+		targets = append(targets, tgt)
+	}
+	s.Apply(result("agent01", targets...))
+	s.Flush()
+	h := New(s, discardLogger()).Handler()
+
+	_, body := get(t, h, "/api/v1/search?sort=duration&order=asc&limit=1")
+	got := body["data"].(map[string]any)["targets"].([]any)[0].(map[string]any)
+	if got["lastScrapeDuration"] != 0.1 {
+		t.Errorf("first row duration = %v, want the smallest 0.1", got["lastScrapeDuration"])
+	}
+}
+
+func TestSearchSortUnknownField(t *testing.T) {
+	_, h := testServer(t)
+	rec, body := get(t, h, "/api/v1/search?sort=nosuchfield")
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+	if body["error"] == nil {
+		t.Error("no error message for an unknown sort field")
+	}
+}
+
+// Without an explicit sort the snapshot order is preserved, which is stable
+// across rebuilds so paging does not skip rows.
+func TestSearchDefaultOrderUnchanged(t *testing.T) {
+	_, h := testServer(t)
+	_, body := get(t, h, "/api/v1/search?filter=labels.job%3Dnode")
+	got := body["data"].(map[string]any)["targets"].([]any)
+	if len(got) != 2 {
+		t.Fatalf("targets = %d, want 2", len(got))
+	}
+	a := got[0].(map[string]any)["scrapeUrl"].(string)
+	b := got[1].(map[string]any)["scrapeUrl"].(string)
+	if a > b {
+		t.Errorf("default order not preserved: %q before %q", a, b)
+	}
+}

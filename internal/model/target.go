@@ -6,6 +6,13 @@ import (
 	"time"
 )
 
+// Conventional label names. Prometheus assigns these during relabeling, so
+// they are the ones worth naming.
+const (
+	LabelInstance = "instance"
+	LabelJob      = "job"
+)
+
 // Target health values as reported by vmagent.
 const (
 	HealthUp      = "up"
@@ -91,10 +98,10 @@ func writeLenPrefixed(h *maphash.Hash, s string) {
 func (t *Target) IsUp() bool { return t.Health == HealthUp }
 
 // Instance returns the instance label, the usual human-facing target name.
-func (t *Target) Instance() string { return t.Labels.Get("instance") }
+func (t *Target) Instance() string { return t.Labels.Get(LabelInstance) }
 
 // Job returns the job label.
-func (t *Target) Job() string { return t.Labels.Get("job") }
+func (t *Target) Job() string { return t.Labels.Get(LabelJob) }
 
 // AgentStatus is the outcome of the most recent poll of one agent.
 type AgentStatus struct {

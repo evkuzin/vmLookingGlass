@@ -14,7 +14,7 @@ listen: :8880
 
 # Defaults for every agent. Both can be overridden per agent below.
 interval: 60s
-timeout: 30s
+timeout: 120s
 
 agents:
   # url accepts a bare host, host:port, or a full URL. A missing port

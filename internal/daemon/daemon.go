@@ -4,6 +4,7 @@ package daemon
 import (
 	"context"
 	"log/slog"
+	"runtime"
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -30,13 +31,37 @@ type Daemon struct {
 	running map[string]*agentTask
 	ctx     context.Context
 	wg      sync.WaitGroup
+
+	// limiter bounds polls in flight across every agent. Decoding one agent's
+	// targets costs seconds of CPU, so a fleet polling at once starves itself
+	// and every poll times out despite each being fast in isolation.
+	limiter *poll.Limiter
 }
 
 // agentTask is one running agent goroutine and the config it was started with.
 type agentTask struct {
 	cfg    config.Agent
+	runner *poll.Runner
 	cancel context.CancelFunc
 	done   chan struct{}
+}
+
+// defaultConcurrency bounds in-flight polls when the config does not.
+// Decoding a large agent response is CPU-bound, so the useful limit tracks
+// available cores rather than agent count.
+func defaultConcurrency() int {
+	n := runtime.NumCPU()
+	if n < 4 {
+		return 4
+	}
+	return n
+}
+
+func concurrencyLimit(configured int) int {
+	if configured <= 0 {
+		return defaultConcurrency()
+	}
+	return configured
 }
 
 func New(log *slog.Logger) *Daemon {
@@ -46,6 +71,7 @@ func New(log *slog.Logger) *Daemon {
 		poller:   poll.New(log),
 		interner: model.NewInterner(),
 		running:  make(map[string]*agentTask),
+		limiter:  poll.NewLimiter(defaultConcurrency()),
 	}
 	d.metrics = metrics.New(prometheus.NewRegistry(), d.store, d.interner)
 	return d
@@ -78,6 +104,11 @@ func (d *Daemon) Reload(c *config.Config) {
 	if d.ctx == nil || d.ctx.Err() != nil {
 		return
 	}
+
+	// Adjust the shared budget in place: replacing it would let agents from
+	// before and after the reload draw on separate budgets, making the
+	// effective limit the sum of the two.
+	d.limiter.SetLimit(concurrencyLimit(c.MaxConcurrency))
 
 	wanted := make(map[string]config.Agent, len(c.Agents))
 	for _, a := range c.Agents {
@@ -116,11 +147,16 @@ func (d *Daemon) Reload(c *config.Config) {
 // start launches one agent's poll loop. Callers hold d.mu.
 func (d *Daemon) start(a config.Agent) {
 	ctx, cancel := context.WithCancel(d.ctx)
-	task := &agentTask{cfg: a, cancel: cancel, done: make(chan struct{})}
-	d.running[a.Name] = task
 
 	runner := poll.NewRunner(d.log, d.publish)
 	runner.SetInterner(d.interner)
+	// One HTTP client and one concurrency budget across the fleet, rather
+	// than a private pool per agent.
+	runner.SetPoller(d.poller)
+	runner.SetLimiter(d.limiter)
+
+	task := &agentTask{cfg: a, runner: runner, cancel: cancel, done: make(chan struct{})}
+	d.running[a.Name] = task
 
 	d.wg.Add(1)
 	go func() {

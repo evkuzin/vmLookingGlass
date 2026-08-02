@@ -13,9 +13,12 @@ import (
 
 const (
 	DefaultInterval = 60 * time.Second
-	DefaultTimeout  = 30 * time.Second
-	DefaultPort     = 8429
-	DefaultListen   = ":8880"
+	// DefaultTimeout covers fetching and decoding a large agent response.
+	// A busy agent returns tens of megabytes, and decoding that costs seconds
+	// of CPU on top of transfer, so the timeout is well above the fetch alone.
+	DefaultTimeout = 120 * time.Second
+	DefaultPort    = 8429
+	DefaultListen  = ":8880"
 )
 
 // Config is the parsed contents of the config file.

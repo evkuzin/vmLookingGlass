@@ -153,6 +153,12 @@ type Runner struct {
 	// interner is shared by all agents so labels common across the fleet are
 	// stored once.
 	interner *model.Interner
+
+	// limiter bounds how many polls are in flight across every runner sharing
+	// it. Decoding one agent's response costs seconds of CPU, so a fleet
+	// polling at once starves itself and every poll times out despite each
+	// being fast alone. Nil means unbounded.
+	limiter *Limiter
 }
 
 // defaultJitter spreads initial polls across a fraction of each interval.
@@ -170,6 +176,21 @@ func NewRunner(log *slog.Logger, publish PublishFunc) *Runner {
 
 // Interner returns the shared label interner.
 func (r *Runner) Interner() *model.Interner { return r.interner }
+
+// Poller returns the HTTP poller backing this runner.
+func (r *Runner) Poller() *Poller { return r.poller }
+
+// SetPoller replaces the poller, so several runners can share one HTTP client
+// and its connection pool. It must be called before Run.
+func (r *Runner) SetPoller(p *Poller) { r.poller = p }
+
+// SetConcurrency bounds how many polls this runner may have in flight.
+// A limit of zero or less leaves it unbounded. It must be called before Run.
+func (r *Runner) SetConcurrency(n int) { r.limiter = NewLimiter(n) }
+
+// SetLimiter makes this runner share a concurrency budget with others, so a
+// fleet of per-agent runners is bounded in total rather than individually.
+func (r *Runner) SetLimiter(l *Limiter) { r.limiter = l }
 
 // SetInterner replaces the interner, so several runners can share one label
 // vocabulary. It must be called before Run.
@@ -213,6 +234,11 @@ func (r *Runner) runAgent(ctx context.Context, a config.Agent) {
 }
 
 func (r *Runner) pollOnce(ctx context.Context, a config.Agent) {
+	if !r.limiter.acquire(ctx) {
+		return
+	}
+	defer r.limiter.release()
+
 	res, status := r.poller.pollAgent(ctx, a, r.interner)
 	// A canceled context means shutdown, not an agent fault; the partial
 	// result would otherwise be published as a spurious failure.
@@ -235,4 +261,78 @@ func (r *Runner) startDelay(interval time.Duration) time.Duration {
 		return 0
 	}
 	return time.Duration(rand.Float64() * span)
+}
+
+// Limiter bounds concurrent polls across every runner sharing it.
+//
+// The limit is adjustable so a config reload can change it without replacing
+// the limiter: runners started before and after a reload must draw on one
+// budget, or the effective limit becomes the sum of the two.
+type Limiter struct {
+	mu    sync.Mutex
+	cond  *sync.Cond
+	limit int
+	held  int
+}
+
+func NewLimiter(limit int) *Limiter {
+	if limit <= 0 {
+		return nil
+	}
+	l := &Limiter{limit: limit}
+	l.cond = sync.NewCond(&l.mu)
+	return l
+}
+
+// SetLimit adjusts the budget, waking any waiter the new limit admits.
+func (l *Limiter) SetLimit(limit int) {
+	if l == nil || limit <= 0 {
+		return
+	}
+	l.mu.Lock()
+	l.limit = limit
+	l.mu.Unlock()
+	l.cond.Broadcast()
+}
+
+// acquire takes a slot, reporting false if ctx ended while waiting.
+func (l *Limiter) acquire(ctx context.Context) bool {
+	if l == nil {
+		return ctx.Err() == nil
+	}
+
+	// Cond has no context support, so a watcher wakes the waiter on cancel.
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			l.cond.Broadcast()
+		case <-done:
+		}
+	}()
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for l.held >= l.limit {
+		if ctx.Err() != nil {
+			return false
+		}
+		l.cond.Wait()
+	}
+	if ctx.Err() != nil {
+		return false
+	}
+	l.held++
+	return true
+}
+
+func (l *Limiter) release() {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.held--
+	l.mu.Unlock()
+	l.cond.Signal()
 }

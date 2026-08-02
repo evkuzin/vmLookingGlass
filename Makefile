@@ -2,7 +2,14 @@ BIN := bin
 
 GO ?= go
 
-.PHONY: all build test race lint clean help
+# A literal comma cannot appear directly inside $(if ...): make reads it as an
+# argument separator.
+comma := ,
+# BUILD_CA points at the corporate trust bundle, needed while the build fetches
+# through TLS interception. Omit it to build off-network.
+CA_SECRET = $(if $(BUILD_CA),--secret id=build_ca$(comma)src=$(BUILD_CA))
+
+.PHONY: all build ui image test race lint clean help
 
 all: build
 
@@ -10,6 +17,15 @@ all: build
 build:
 	$(GO) build -o $(BIN)/vmlookingglass ./cmd/vmlookingglass
 	$(GO) build -o $(BIN)/vmlg ./cmd/vmlg
+
+## ui: build the web UI into web/ui/dist (needs npm)
+ui:
+	cd web/ui && npm install && npm run build
+
+## image: build UI and binaries in a container, avoiding host toolchains
+image:
+	DOCKER_BUILDKIT=1 docker build $(CA_SECRET) \
+	  -t vmlookingglass:$(or $(TAG),dev) .
 
 ## test: run the test suite
 test:

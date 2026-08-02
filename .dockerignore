@@ -1,0 +1,11 @@
+.git
+.github
+bin/
+dist/
+node_modules
+web/ui/node_modules
+web/ui/dist
+*.test
+*.out
+config.yml
+.vscode

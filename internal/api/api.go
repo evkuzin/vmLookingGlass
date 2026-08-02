@@ -119,12 +119,23 @@ type jsonTarget struct {
 	Agent        string   `json:"agent"`
 	Agents       []string `json:"agents"`
 	MultiScraped bool     `json:"multiScraped"`
+	// HealthByAgent is set when the agents disagree, so a caller can tell a
+	// target that is down from one only some agents can reach.
+	HealthByAgent map[string]string `json:"healthByAgent,omitempty"`
+	Disputed      bool              `json:"disputed,omitempty"`
 }
 
 func toJSON(e *store.Entry) jsonTarget {
 	agent := ""
 	if len(e.Agents) > 0 {
 		agent = e.Agents[0]
+	}
+	// The per-agent breakdown is only meaningful when they disagree, so it is
+	// omitted otherwise rather than repeating one value per agent.
+	disputed := e.Disputed()
+	var byAgent map[string]string
+	if disputed {
+		byAgent = e.HealthByAgent
 	}
 	return jsonTarget{
 		DiscoveredLabels:   e.DiscoveredLabels.Map(),
@@ -139,6 +150,8 @@ func toJSON(e *store.Entry) jsonTarget {
 		Agent:              agent,
 		Agents:             e.Agents,
 		MultiScraped:       e.MultiScraped(),
+		Disputed:           disputed,
+		HealthByAgent:      byAgent,
 	}
 }
 

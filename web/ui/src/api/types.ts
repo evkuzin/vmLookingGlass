@@ -17,6 +17,9 @@ export type Target = {
   agent: string;
   agents: string[];
   multiScraped: boolean;
+  // Present only when the agents disagree about this target's health.
+  disputed?: boolean;
+  healthByAgent?: Record<string, string>;
 };
 
 export type SearchResult = {

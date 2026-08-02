@@ -551,3 +551,88 @@ func TestTargetOrderByLabelsWithSharedURL(t *testing.T) {
 		}
 	}
 }
+
+// When agents disagree about a target the row must say so, rather than
+// showing whichever agent happened to scrape last. Partial reachability is a
+// real fault and hiding it behind a single health defeats the point.
+func TestAgentsDisagreeOnHealth(t *testing.T) {
+	in := model.NewInterner()
+	labels := map[string]string{"instance": "h:9100"}
+	const url = "http://h:9100/metrics"
+
+	mk := func(agent, health string, ts time.Time, errMsg string) model.Target {
+		return model.Target{
+			Agent: agent, ScrapePool: "p", ScrapeURL: url,
+			Labels: in.Labels(labels), Health: health,
+			LastScrape: ts, LastError: errMsg,
+		}
+	}
+	now := time.Now()
+
+	s := New()
+	s.Apply(poll.AgentResult{
+		Result: &poll.Result{Active: []model.Target{mk("agentA", model.HealthUp, now, "")}},
+		Status: model.AgentStatus{Name: "agentA"},
+	})
+	s.Apply(poll.AgentResult{
+		Result: &poll.Result{Active: []model.Target{
+			mk("agentB", model.HealthDown, now.Add(time.Second), "no route to host")}},
+		Status: model.AgentStatus{Name: "agentB"},
+	})
+	s.Flush()
+
+	e := s.Snapshot().Targets[0]
+	if !e.Disputed() {
+		t.Error("agents reporting different health did not mark the target disputed")
+	}
+	if got := e.HealthByAgent["agentA"]; got != model.HealthUp {
+		t.Errorf("agentA health = %q, want up", got)
+	}
+	if got := e.HealthByAgent["agentB"]; got != model.HealthDown {
+		t.Errorf("agentB health = %q, want down", got)
+	}
+	// A target reachable from somewhere is up somewhere, and unreachable
+	// from elsewhere: both need to be visible.
+	if e.Health != model.HealthDown {
+		t.Errorf("Health = %q; a disputed target should surface the failure", e.Health)
+	}
+}
+
+// Agents agreeing must not be flagged, or every multi-scraped target in a
+// healthy fleet would look disputed.
+func TestAgentsAgreeNotDisputed(t *testing.T) {
+	in := model.NewInterner()
+	labels := map[string]string{"instance": "h:9100"}
+	const url = "http://h:9100/metrics"
+
+	mk := func(agent string) model.Target {
+		return model.Target{
+			Agent: agent, ScrapePool: "p", ScrapeURL: url,
+			Labels: in.Labels(labels), Health: model.HealthUp,
+		}
+	}
+	s := New()
+	s.Apply(result("agentA", mk("agentA")))
+	s.Apply(result("agentB", mk("agentB")))
+	s.Flush()
+
+	e := s.Snapshot().Targets[0]
+	if e.Disputed() {
+		t.Error("agents in agreement were flagged as disputed")
+	}
+	if !e.MultiScraped() {
+		t.Error("target scraped by two agents not flagged multi-scraped")
+	}
+}
+
+// A single agent can never disagree with itself.
+func TestSingleAgentNeverDisputed(t *testing.T) {
+	in := model.NewInterner()
+	s := New()
+	s.Apply(result("a1", target(in, "a1", "http://h/m", map[string]string{"instance": "h"})))
+	s.Flush()
+
+	if s.Snapshot().Targets[0].Disputed() {
+		t.Error("a target scraped by one agent was flagged disputed")
+	}
+}

@@ -89,7 +89,21 @@ const TargetRow: FC<{ target: Target }> = ({ target }) => {
           <Text size="sm">{target.scrapePool}</Text>
         </Table.Td>
         <Table.Td>
-          <HealthBadge health={target.health} />
+          <Group gap={4} wrap="nowrap">
+            <HealthBadge health={target.health} />
+            {target.disputed && (
+              <Tooltip
+                withArrow
+                label={Object.entries(target.healthByAgent ?? {})
+                  .map(([a, h]) => `${a}: ${h}`)
+                  .join(", ")}
+              >
+                <Badge color="orange" variant="filled" leftSection={<IconAlertTriangle size={11} />}>
+                  disputed
+                </Badge>
+              </Tooltip>
+            )}
+          </Group>
         </Table.Td>
         <Table.Td>
           <Group gap={4} wrap="wrap">
@@ -121,6 +135,19 @@ const TargetRow: FC<{ target: Target }> = ({ target }) => {
         <Table.Tr>
           <Table.Td colSpan={8}>
             <Stack gap="sm" p="sm">
+              {target.disputed && (
+                <Alert color="orange" icon={<IconAlertTriangle size={14} />} title="Agents disagree">
+                  This target is reachable from some agents and not others, which
+                  points at a network fault rather than the target being down.
+                  <Stack gap={2} mt="xs">
+                    {Object.entries(target.healthByAgent ?? {}).map(([a, h]) => (
+                      <Text key={a} size="xs">
+                        {a}: <b>{h}</b>
+                      </Text>
+                    ))}
+                  </Stack>
+                </Alert>
+              )}
               {target.lastError && (
                 <Alert color="red" icon={<IconAlertTriangle size={14} />} title="Last scrape error">
                   {target.lastError}

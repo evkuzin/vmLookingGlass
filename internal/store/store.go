@@ -23,11 +23,32 @@ type Entry struct {
 
 	// Agents names every agent scraping this target, sorted.
 	Agents []string
+	// HealthByAgent records what each agent last saw, which is the only way
+	// to tell a target that is down from one that is merely unreachable from
+	// part of the fleet.
+	HealthByAgent map[string]string
 }
 
 // MultiScraped reports whether more than one agent scrapes this target, which
 // usually means overlapping discovery rules.
 func (e *Entry) MultiScraped() bool { return len(e.Agents) > 1 }
+
+// Disputed reports whether the agents scraping this target disagree about its
+// health, which points at a network fault between some agents and the target
+// rather than at the target itself.
+func (e *Entry) Disputed() bool {
+	var first string
+	for _, h := range e.HealthByAgent {
+		if first == "" {
+			first = h
+			continue
+		}
+		if h != first {
+			return true
+		}
+	}
+	return false
+}
 
 // Snapshot is an immutable view of the fleet at one instant. Readers may hold
 // one for as long as they like; it is never mutated after publication.
@@ -269,19 +290,33 @@ func merge(byKey map[model.TargetKey]*Entry, tgt *model.Target, agent string) {
 	key := tgt.Key()
 	e, ok := byKey[key]
 	if !ok {
-		byKey[key] = &Entry{Target: *tgt, Agents: []string{agent}}
+		byKey[key] = &Entry{
+			Target:        *tgt,
+			Agents:        []string{agent},
+			HealthByAgent: map[string]string{agent: tgt.Health},
+		}
 		return
 	}
 	// Agents are visited in sorted order, so appending keeps them sorted.
 	if !slices.Contains(e.Agents, agent) {
 		e.Agents = append(e.Agents, agent)
 	}
+	e.HealthByAgent[agent] = tgt.Health
+
 	// Agents poll on independent schedules, so keep the freshest observation
 	// of the target's scrape state.
 	if tgt.LastScrape.After(e.LastScrape) {
-		agents := e.Agents
+		agents, health := e.Agents, e.HealthByAgent
 		e.Target = *tgt
-		e.Agents = agents
+		e.Agents, e.HealthByAgent = agents, health
+	}
+
+	// A failure seen by any agent has to survive the merge: showing the
+	// target as up because one agent reached it would hide the fault the
+	// disagreement represents.
+	if !tgt.IsUp() && e.IsUp() {
+		e.Health = tgt.Health
+		e.LastError = tgt.LastError
 	}
 }
 

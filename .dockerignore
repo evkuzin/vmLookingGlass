@@ -9,3 +9,4 @@ web/ui/dist
 *.out
 config.yml
 .vscode
+.env

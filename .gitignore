@@ -11,3 +11,6 @@ web/ui/dist/*
 
 # Editor state.
 .vscode/
+
+# Local build settings; see .env.example.
+.env

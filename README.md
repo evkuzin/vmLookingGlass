@@ -82,7 +82,31 @@ debugging aid, not an inventory.
 ## Building
 
 ```sh
-go build ./cmd/vmlookingglass    # the daemon
-go build ./cmd/vmlg              # the CLI
-go test ./...
+make                    # binaries with the embedded UI, into bin/
+make test
+```
+
+On a network that TLS-inspects outbound traffic, the interception cert is not
+in the base images' trust store and the build cannot fetch dependencies. Point
+`BUILD_CA` at a bundle that includes it:
+
+```sh
+cp .env.example .env    # then set BUILD_CA
+```
+
+Everywhere else no certificate is needed and `make` works as-is.
+
+The build runs in a container: the UI needs a Node toolchain whose version
+matters, and building it there keeps the result independent of whatever is
+installed on the host. BuildKit writes the binaries straight to `bin/`, so no
+image is left behind.
+
+`make build-host` compiles with the local Go toolchain instead. That skips the
+UI, so the daemon serves the API only and says so at startup; it is for quick
+iteration on the daemon, not for producing something to ship.
+
+For a runnable container image rather than binaries:
+
+```sh
+docker build --target runtime -t vmlookingglass .
 ```

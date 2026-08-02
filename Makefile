@@ -2,6 +2,12 @@ BIN := bin
 
 GO ?= go
 
+# Local settings, so the corporate CA and similar do not have to be passed on
+# every invocation. Optional: the build works without it off-network.
+# -include tolerates the file being absent.
+-include .env
+export
+
 # A literal comma cannot appear directly inside $(if ...): make reads it as an
 # argument separator.
 comma := ,
@@ -9,32 +15,25 @@ comma := ,
 # through TLS interception. Omit it to build off-network.
 CA_SECRET = $(if $(BUILD_CA),--secret id=build_ca$(comma)src=$(BUILD_CA))
 
-.PHONY: all build ui image extract test race lint clean help
+.PHONY: all build build-host test race lint clean help
 
 all: build
 
-## build: compile the daemon and the CLI into bin/
+## build: build the UI and binaries in a container, leaving them in bin/
+#
+# The build runs in a container because the UI needs a Node toolchain whose
+# version matters, and the host's is shared and can shift underneath us.
+# BuildKit writes the binaries straight out to bin/, so no image is kept.
 build:
+	DOCKER_BUILDKIT=1 docker build $(CA_SECRET) --target export \
+	  --output type=local$(comma)dest=$(BIN) .
+	@echo "binaries with the embedded UI are in $(BIN)/"
+
+## build-host: compile on the host without the UI, for quick daemon iteration
+build-host:
 	$(GO) build -o $(BIN)/vmlookingglass ./cmd/vmlookingglass
 	$(GO) build -o $(BIN)/vmlg ./cmd/vmlg
-
-## ui: build the web UI into web/ui/dist (needs npm)
-ui:
-	cd web/ui && npm install && npm run build
-
-## image: build UI and binaries in a container, avoiding host toolchains
-image:
-	DOCKER_BUILDKIT=1 docker build $(CA_SECRET) \
-	  -t vmlookingglass:$(or $(TAG),dev) .
-
-## extract: copy the binaries out of the image into bin/
-extract: image
-	@mkdir -p $(BIN)
-	$(eval CID := $(shell docker create vmlookingglass:$(or $(TAG),dev)))
-	@docker cp $(CID):/usr/bin/vmlookingglass $(BIN)/vmlookingglass
-	@docker cp $(CID):/usr/bin/vmlg $(BIN)/vmlg
-	@docker rm -v $(CID) >/dev/null
-	@echo "binaries with the embedded UI are in $(BIN)/"
+	@echo "host build has no embedded UI; use 'make build' for a full binary"
 
 ## test: run the test suite
 test:

@@ -10,16 +10,13 @@ import (
 var in = model.NewInterner()
 
 func entry(agent, pool, url string, labels map[string]string) *store.Entry {
-	return &store.Entry{
-		Target: model.Target{
-			Agent:      agent,
-			ScrapePool: pool,
-			ScrapeURL:  url,
-			Labels:     in.Labels(labels),
-			Health:     model.HealthUp,
-		},
-		Agents: []string{agent},
-	}
+	return store.NewEntry(model.Target{
+		Agent:      agent,
+		ScrapePool: pool,
+		ScrapeURL:  url,
+		Labels:     in.Labels(labels),
+		Health:     model.HealthUp,
+	}, agent)
 }
 
 func mustParse(t *testing.T, exprs ...string) *Query {
@@ -198,7 +195,7 @@ func TestAgentFilter(t *testing.T) {
 // A target merged across agents matches if any of its agents matches.
 func TestAgentFilterMatchesAnyScrapingAgent(t *testing.T) {
 	e := entry("a1", "p", "http://h/m", nil)
-	e.Agents = []string{"a1", "a2"}
+	e.SetAgentHealth("a2", model.HealthUp)
 
 	if !mustParse(t, "agent=a2").Match(in, e) {
 		t.Error("agent filter did not match the second scraping agent")

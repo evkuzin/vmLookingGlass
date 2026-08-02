@@ -131,16 +131,17 @@ type jsonTarget struct {
 }
 
 func toJSON(in *model.Interner, e *store.Entry) jsonTarget {
+	agents := e.Agents()
 	agent := ""
-	if len(e.Agents) > 0 {
-		agent = e.Agents[0]
+	if len(agents) > 0 {
+		agent = agents[0]
 	}
 	// The per-agent breakdown is only meaningful when they disagree, so it is
 	// omitted otherwise rather than repeating one value per agent.
 	disputed := e.Disputed()
 	var byAgent map[string]string
 	if disputed {
-		byAgent = e.HealthByAgent
+		byAgent = e.HealthByAgent()
 	}
 	return jsonTarget{
 		DiscoveredLabels:   e.DiscoveredLabels.Map(in),
@@ -153,7 +154,7 @@ func toJSON(in *model.Interner, e *store.Entry) jsonTarget {
 		LastSamplesScraped: e.LastSamplesScraped,
 		Health:             e.Health,
 		Agent:              agent,
-		Agents:             e.Agents,
+		Agents:             agents,
 		MultiScraped:       e.MultiScraped(),
 		Disputed:           disputed,
 		HealthByAgent:      byAgent,
@@ -241,7 +242,9 @@ var sortFields = map[string]func(in *model.Interner, a, b *store.Entry) int{
 	"samples": func(_ *model.Interner, a, b *store.Entry) int {
 		return cmp.Compare(a.LastSamplesScraped, b.LastSamplesScraped)
 	},
-	"agents": func(_ *model.Interner, a, b *store.Entry) int { return cmp.Compare(len(a.Agents), len(b.Agents)) },
+	"agents": func(_ *model.Interner, a, b *store.Entry) int {
+		return cmp.Compare(a.AgentCount(), b.AgentCount())
+	},
 }
 
 func sortFieldNames() string {

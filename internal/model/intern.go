@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // internShards is the number of independent maps the interner is split
@@ -42,20 +43,25 @@ type Interner struct {
 	shards [internShards]internShard
 	seed   maphash.Seed
 
-	// mu guards strs, the index-to-string table. It is separate from the
-	// shard locks because a lookup only reads the table while an insert
-	// appends to it.
-	mu   sync.RWMutex
-	strs []string
+	// mu serializes appends to the index-to-string table.
+	mu sync.Mutex
+	// strs is that table, published atomically. Lookup happens far more often
+	// than insertion, on every label comparison during a sort, so it must not
+	// take a lock: a single one behind millions of calls per poll serializes
+	// the whole fleet.
+	//
+	// The table is append-only and a reader holds the slice header it loaded,
+	// so a concurrent append either grows the same array beneath it, leaving
+	// its own view valid, or copies to a new one it never sees.
+	strs atomic.Pointer[[]string]
 }
 
 func NewInterner() *Interner {
-	in := &Interner{
-		seed: maphash.MakeSeed(),
-		// Position zero is the empty string, so emptyIndex is valid from the
-		// start and no caller has to special-case an unset label.
-		strs: []string{""},
-	}
+	in := &Interner{seed: maphash.MakeSeed()}
+	// Position zero is the empty string, so emptyIndex is valid from the
+	// start and no caller has to special-case an unset label.
+	initial := []string{""}
+	in.strs.Store(&initial)
 	for i := range in.shards {
 		in.shards[i].m = make(map[string]uint32)
 	}
@@ -88,15 +94,31 @@ func (in *Interner) Intern(s string) uint32 {
 	}
 
 	in.mu.Lock()
+	cur := *in.strs.Load()
 	// The vocabulary is bounded by the fleet's distinct label strings, orders
 	// of magnitude below this, but wrapping would silently alias every label
 	// that followed.
-	if len(in.strs) > math.MaxUint32 {
+	if len(cur) > math.MaxUint32 {
 		in.mu.Unlock()
 		panic("model: interner exhausted its index space")
 	}
-	idx = uint32(len(in.strs)) //nolint:gosec // bounded by the check above
-	in.strs = append(in.strs, s)
+	idx = uint32(len(cur)) //nolint:gosec // bounded by the check above
+
+	// Writing into spare capacity would mutate the array a concurrent Lookup
+	// is reading, so grow to a fresh one and leave the old array untouched
+	// for readers still holding it. Doubling keeps this amortized: copying on
+	// every insert would make building the vocabulary quadratic.
+	var next []string
+	if len(cur) < cap(cur) {
+		// Room to spare only exists in an array this goroutine grew and no
+		// reader has seen at this length, so writing past len is safe.
+		next = cur[:len(cur)+1]
+	} else {
+		next = make([]string, len(cur)+1, max(8, 2*cap(cur)))
+		copy(next, cur)
+	}
+	next[idx] = s
+	in.strs.Store(&next)
 	in.mu.Unlock()
 
 	sh.m[s] = idx
@@ -107,12 +129,11 @@ func (in *Interner) Intern(s string) uint32 {
 // out. An unknown index reads as empty rather than panicking, so a corrupt
 // label cannot take down a request.
 func (in *Interner) Lookup(idx uint32) string {
-	in.mu.RLock()
-	defer in.mu.RUnlock()
-	if int(idx) >= len(in.strs) {
+	strs := *in.strs.Load()
+	if int(idx) >= len(strs) {
 		return ""
 	}
-	return in.strs[idx]
+	return strs[idx]
 }
 
 // String returns the canonical instance of s. It exists for callers that want
@@ -130,22 +151,23 @@ func (in *Interner) Value(l Label) string { return in.Lookup(l.Value) }
 // Len returns the number of distinct interned strings, excluding the empty
 // string held at position zero.
 func (in *Interner) Len() int {
-	in.mu.RLock()
-	defer in.mu.RUnlock()
-	return len(in.strs) - 1
+	return len(*in.strs.Load()) - 1
 }
 
 // Bytes returns the total length of every interned string, which is the label
 // text the whole fleet shares.
 func (in *Interner) Bytes() int {
-	in.mu.RLock()
-	defer in.mu.RUnlock()
 	n := 0
-	for _, s := range in.strs {
+	for _, s := range *in.strs.Load() {
 		n += len(s)
 	}
 	return n
 }
+
+// Table returns the index-to-string table for callers that resolve many
+// labels in a tight loop, such as a sort comparator, and would otherwise pay
+// a load per label. The slice is append-only and must not be modified.
+func (in *Interner) Table() []string { return *in.strs.Load() }
 
 // Labels interns every name and value in m and returns them as a Labels set.
 func (in *Interner) Labels(m map[string]string) Labels {
@@ -158,8 +180,12 @@ func (in *Interner) Labels(m map[string]string) Labels {
 	}
 	// Sorted by name so lookup can binary search and so two sets with the
 	// same content compare equal regardless of discovery order.
+	//
+	// The table is loaded once rather than per comparison: a sort resolves
+	// each name several times, and this runs for every target of every poll.
+	strs := *in.strs.Load()
 	slices.SortFunc(out, func(a, b Label) int {
-		return strings.Compare(in.Lookup(a.Name), in.Lookup(b.Name))
+		return strings.Compare(strs[a.Name], strs[b.Name])
 	})
 	return out
 }

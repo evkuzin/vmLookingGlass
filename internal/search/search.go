@@ -181,12 +181,7 @@ func parseRegexField(expr, field string, value func(*store.Entry) string) (match
 type agentMatcher struct{ re *regexp.Regexp }
 
 func (m *agentMatcher) match(_ *model.Interner, e *store.Entry) bool {
-	for _, a := range e.Agents {
-		if m.re.MatchString(a) {
-			return true
-		}
-	}
-	return false
+	return e.AnyAgent(m.re.MatchString)
 }
 
 func parseAgent(expr string) (matcher, error) {

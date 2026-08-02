@@ -21,33 +21,92 @@ import (
 type Entry struct {
 	model.Target
 
-	// Agents names every agent scraping this target, sorted.
-	Agents []string
-	// HealthByAgent records what each agent last saw, which is the only way
-	// to tell a target that is down from one that is merely unreachable from
-	// part of the fleet.
-	HealthByAgent map[string]string
+	// scrapers is every agent scraping this target and what it last saw,
+	// sorted by agent. Recording health per agent is the only way to tell a
+	// target that is down from one merely unreachable from part of the fleet.
+	//
+	// One slice of pairs rather than two slices or a map: there is an entry
+	// per distinct target in the fleet, so each extra allocation here costs
+	// hundreds of thousands.
+	scrapers []scraper
+}
+
+// NewEntry builds an entry for a target scraped by the named agents, all
+// reporting the target's own health. It exists for tests and callers outside
+// this package, which cannot reach the unexported scraper list.
+func NewEntry(t model.Target, agents ...string) *Entry {
+	e := &Entry{Target: t, scrapers: make([]scraper, 0, len(agents))}
+	for _, a := range agents {
+		e.scrapers = append(e.scrapers, scraper{agent: a, health: t.Health})
+	}
+	return e
+}
+
+// SetAgentHealth records what one agent saw, for building an entry whose
+// agents disagree.
+func (e *Entry) SetAgentHealth(agent, health string) {
+	for i := range e.scrapers {
+		if e.scrapers[i].agent == agent {
+			e.scrapers[i].health = health
+			return
+		}
+	}
+	e.scrapers = append(e.scrapers, scraper{agent: agent, health: health})
+}
+
+// scraper is one agent's view of a target.
+type scraper struct {
+	agent  string
+	health string
+}
+
+// AnyAgent reports whether any agent scraping this target satisfies f, without
+// building a slice: it runs per target on every filtered search.
+func (e *Entry) AnyAgent(f func(string) bool) bool {
+	for _, s := range e.scrapers {
+		if f(s.agent) {
+			return true
+		}
+	}
+	return false
+}
+
+// AgentCount returns how many agents scrape this target.
+func (e *Entry) AgentCount() int { return len(e.scrapers) }
+
+// Agents names every agent scraping this target, sorted.
+func (e *Entry) Agents() []string {
+	out := make([]string, len(e.scrapers))
+	for i, s := range e.scrapers {
+		out[i] = s.agent
+	}
+	return out
 }
 
 // MultiScraped reports whether more than one agent scrapes this target, which
 // usually means overlapping discovery rules.
-func (e *Entry) MultiScraped() bool { return len(e.Agents) > 1 }
+func (e *Entry) MultiScraped() bool { return len(e.scrapers) > 1 }
 
 // Disputed reports whether the agents scraping this target disagree about its
 // health, which points at a network fault between some agents and the target
 // rather than at the target itself.
 func (e *Entry) Disputed() bool {
-	var first string
-	for _, h := range e.HealthByAgent {
-		if first == "" {
-			first = h
-			continue
-		}
-		if h != first {
+	for i := 1; i < len(e.scrapers); i++ {
+		if e.scrapers[i].health != e.scrapers[0].health {
 			return true
 		}
 	}
 	return false
+}
+
+// HealthByAgent reports what each agent last saw. It is built on demand,
+// since it is only worth showing when the agents disagree.
+func (e *Entry) HealthByAgent() map[string]string {
+	m := make(map[string]string, len(e.scrapers))
+	for _, s := range e.scrapers {
+		m[s.agent] = s.health
+	}
+	return m
 }
 
 // Snapshot is an immutable view of the fleet at one instant. Readers may hold
@@ -337,7 +396,8 @@ func (s *Store) publish() {
 	}
 	// Sorted by identity so snapshot order is stable between rebuilds and
 	// pagination stays consistent across requests.
-	slices.SortFunc(snap.Targets, func(a, b *Entry) int { return compareEntries(s.interner, a, b) })
+	strs := s.interner.Table()
+	slices.SortFunc(snap.Targets, func(a, b *Entry) int { return compareEntries(strs, a, b) })
 
 	snap.ScrapePools = make([]string, 0, len(pools))
 	for p := range pools {
@@ -355,24 +415,25 @@ func merge(byKey map[model.TargetKey]*Entry, tgt *model.Target, agent string) {
 	e, ok := byKey[key]
 	if !ok {
 		byKey[key] = &Entry{
-			Target:        *tgt,
-			Agents:        []string{agent},
-			HealthByAgent: map[string]string{agent: tgt.Health},
+			Target:   *tgt,
+			scrapers: []scraper{{agent: agent, health: tgt.Health}},
 		}
 		return
 	}
 	// Agents are visited in sorted order, so appending keeps them sorted.
-	if !slices.Contains(e.Agents, agent) {
-		e.Agents = append(e.Agents, agent)
+	// Agents are visited in sorted order, so appending keeps them sorted.
+	if i := slices.IndexFunc(e.scrapers, func(s scraper) bool { return s.agent == agent }); i >= 0 {
+		e.scrapers[i].health = tgt.Health
+	} else {
+		e.scrapers = append(e.scrapers, scraper{agent: agent, health: tgt.Health})
 	}
-	e.HealthByAgent[agent] = tgt.Health
 
 	// Agents poll on independent schedules, so keep the freshest observation
 	// of the target's scrape state.
 	if tgt.LastScrape.After(e.LastScrape) {
-		agents, health := e.Agents, e.HealthByAgent
+		scrapers := e.scrapers
 		e.Target = *tgt
-		e.Agents, e.HealthByAgent = agents, health
+		e.scrapers = scrapers
 	}
 
 	// A failure seen by any agent has to survive the merge: showing the
@@ -389,17 +450,21 @@ func merge(byKey map[model.TargetKey]*Entry, tgt *model.Target, agent string) {
 // Labels are compared pair by pair rather than by formatting each set into a
 // string: the comparator runs O(n log n) times over the whole fleet, and
 // building a string per call dominated the rebuild.
-func compareEntries(in *model.Interner, a, b *Entry) int {
+// compareEntries orders by scrape URL, then by label text. strs is the
+// interner's table, passed in rather than looked up per call: this runs
+// O(n log n) times over the whole fleet.
+//
+// Labels compare by text, not by index: indices reflect the order strings
+// were first seen, which would make ordering depend on poll timing.
+func compareEntries(strs []string, a, b *Entry) int {
 	if c := strings.Compare(a.ScrapeURL, b.ScrapeURL); c != 0 {
 		return c
 	}
-	// Labels compare by text, not by index: indices reflect the order strings
-	// were first seen, which would make ordering depend on poll timing.
 	for i := 0; i < len(a.Labels) && i < len(b.Labels); i++ {
-		if c := strings.Compare(in.Name(a.Labels[i]), in.Name(b.Labels[i])); c != 0 {
+		if c := strings.Compare(strs[a.Labels[i].Name], strs[b.Labels[i].Name]); c != 0 {
 			return c
 		}
-		if c := strings.Compare(in.Value(a.Labels[i]), in.Value(b.Labels[i])); c != 0 {
+		if c := strings.Compare(strs[a.Labels[i].Value], strs[b.Labels[i].Value]); c != 0 {
 			return c
 		}
 	}

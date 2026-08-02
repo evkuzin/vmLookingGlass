@@ -82,8 +82,8 @@ func TestApplySingleAgent(t *testing.T) {
 		t.Fatalf("agents = %d, want 1", len(snap.Agents))
 	}
 	for _, tgt := range snap.Targets {
-		if len(tgt.Agents) != 1 || tgt.Agents[0] != "a1" {
-			t.Errorf("target %s: agents = %v, want [a1]", tgt.ScrapeURL, tgt.Agents)
+		if len(tgt.Agents()) != 1 || tgt.Agents()[0] != "a1" {
+			t.Errorf("target %s: agents = %v, want [a1]", tgt.ScrapeURL, tgt.Agents())
 		}
 		if tgt.MultiScraped() {
 			t.Errorf("target %s wrongly flagged as multi-scraped", tgt.ScrapeURL)
@@ -108,15 +108,15 @@ func TestTargetScrapedByTwoAgents(t *testing.T) {
 		t.Fatalf("targets = %d, want 1 merged row", len(snap.Targets))
 	}
 	tgt := snap.Targets[0]
-	if len(tgt.Agents) != 2 {
-		t.Fatalf("agents = %v, want both", tgt.Agents)
+	if len(tgt.Agents()) != 2 {
+		t.Fatalf("agents = %v, want both", tgt.Agents())
 	}
 	if !tgt.MultiScraped() {
 		t.Error("target scraped by two agents not flagged")
 	}
 	// Agent order must be stable regardless of arrival order.
-	if tgt.Agents[0] != "a1" || tgt.Agents[1] != "a2" {
-		t.Errorf("agents = %v, want sorted [a1 a2]", tgt.Agents)
+	if tgt.Agents()[0] != "a1" || tgt.Agents()[1] != "a2" {
+		t.Errorf("agents = %v, want sorted [a1 a2]", tgt.Agents())
 	}
 }
 
@@ -133,8 +133,8 @@ func TestRepeatedPollDoesNotDuplicateAgent(t *testing.T) {
 	s.Flush()
 
 	tgt := s.Snapshot().Targets[0]
-	if len(tgt.Agents) != 1 {
-		t.Errorf("agents = %v, want a single entry after repeated polls", tgt.Agents)
+	if len(tgt.Agents()) != 1 {
+		t.Errorf("agents = %v, want a single entry after repeated polls", tgt.Agents())
 	}
 	if tgt.MultiScraped() {
 		t.Error("target flagged multi-scraped after repeated polls by one agent")
@@ -161,8 +161,8 @@ func TestDuplicateTargetWithinOneAgent(t *testing.T) {
 		t.Fatalf("targets = %d, want 1 merged row", len(snap.Targets))
 	}
 	tgt := snap.Targets[0]
-	if len(tgt.Agents) != 1 {
-		t.Errorf("agents = %v, want a single entry", tgt.Agents)
+	if len(tgt.Agents()) != 1 {
+		t.Errorf("agents = %v, want a single entry", tgt.Agents())
 	}
 	if tgt.MultiScraped() {
 		t.Error("one agent reporting a target twice flagged as multi-scraped")
@@ -221,12 +221,12 @@ func TestMergeOrderIndependent(t *testing.T) {
 	reverse.Flush()
 
 	f, r := forward.Snapshot().Targets[0], reverse.Snapshot().Targets[0]
-	if len(f.Agents) != len(r.Agents) {
-		t.Fatalf("agent counts differ: %v vs %v", f.Agents, r.Agents)
+	if len(f.Agents()) != len(r.Agents()) {
+		t.Fatalf("agent counts differ: %v vs %v", f.Agents(), r.Agents())
 	}
-	for i := range f.Agents {
-		if f.Agents[i] != r.Agents[i] {
-			t.Errorf("agent order differs: %v vs %v", f.Agents, r.Agents)
+	for i := range f.Agents() {
+		if f.Agents()[i] != r.Agents()[i] {
+			t.Errorf("agent order differs: %v vs %v", f.Agents(), r.Agents())
 		}
 	}
 }
@@ -585,10 +585,10 @@ func TestAgentsDisagreeOnHealth(t *testing.T) {
 	if !e.Disputed() {
 		t.Error("agents reporting different health did not mark the target disputed")
 	}
-	if got := e.HealthByAgent["agentA"]; got != model.HealthUp {
+	if got := e.HealthByAgent()["agentA"]; got != model.HealthUp {
 		t.Errorf("agentA health = %q, want up", got)
 	}
-	if got := e.HealthByAgent["agentB"]; got != model.HealthDown {
+	if got := e.HealthByAgent()["agentB"]; got != model.HealthDown {
 		t.Errorf("agentB health = %q, want down", got)
 	}
 	// A target reachable from somewhere is up somewhere, and unreachable

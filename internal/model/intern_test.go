@@ -139,3 +139,26 @@ func TestInternConcurrent(t *testing.T) {
 		}
 	}
 }
+
+// Interning is on the hot path of every poll, and the whole fleet interns the
+// same vocabulary at once, so throughput must not collapse under concurrency.
+func TestInternScalesWithConcurrency(t *testing.T) {
+	const goroutines, keys = 64, 500
+
+	in := NewInterner()
+	var wg sync.WaitGroup
+	for range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range keys {
+				in.String(fmt.Sprintf("label-value-%d", i))
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := in.Len(); got != keys {
+		t.Errorf("Len = %d, want %d; concurrent interning lost or duplicated entries", got, keys)
+	}
+}

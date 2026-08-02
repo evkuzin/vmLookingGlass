@@ -2,26 +2,49 @@
 package model
 
 import (
+	"hash/maphash"
 	"slices"
 	"strings"
 	"sync"
 )
 
+// internShards is the number of independent maps the interner is split
+// across. Every agent interns the whole fleet vocabulary on every poll, so a
+// single lock serializes the hot path; spreading keys over many locks keeps
+// throughput rising with concurrency instead of collapsing.
+const internShards = 64
+
+type internShard struct {
+	mu sync.RWMutex
+	m  map[string]string
+	// Pad to a cache line so adjacent shards' locks do not share one, which
+	// would reintroduce contention through false sharing.
+	_ [40]byte
+}
+
 // Interner deduplicates label strings across agents.
 //
 // Scrape target metadata repeats heavily: a fleet-wide poll contains hundreds
 // of thousands of label pairs drawn from only a few thousand distinct strings,
-// so canonicalising them collapses label memory by two orders of magnitude.
+// so canonicalizing them collapses label memory by two orders of magnitude.
 //
 // Entries are never evicted. The distinct-string set is bounded by the label
 // vocabulary of the monitored fleet, not by target count, so it converges.
 type Interner struct {
-	mu sync.RWMutex
-	m  map[string]string
+	shards [internShards]internShard
+	seed   maphash.Seed
 }
 
 func NewInterner() *Interner {
-	return &Interner{m: make(map[string]string)}
+	in := &Interner{seed: maphash.MakeSeed()}
+	for i := range in.shards {
+		in.shards[i].m = make(map[string]string)
+	}
+	return in
+}
+
+func (in *Interner) shard(s string) *internShard {
+	return &in.shards[maphash.String(in.seed, s)%internShards]
 }
 
 // String returns the canonical instance of s, storing it if not yet seen.
@@ -29,28 +52,35 @@ func (in *Interner) String(s string) string {
 	if s == "" {
 		return ""
 	}
-	in.mu.RLock()
-	got, ok := in.m[s]
-	in.mu.RUnlock()
+	sh := in.shard(s)
+
+	sh.mu.RLock()
+	got, ok := sh.m[s]
+	sh.mu.RUnlock()
 	if ok {
 		return got
 	}
 
-	in.mu.Lock()
-	defer in.mu.Unlock()
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
 	// Another goroutine may have stored it between the two locks.
-	if got, ok := in.m[s]; ok {
+	if got, ok := sh.m[s]; ok {
 		return got
 	}
-	in.m[s] = s
+	sh.m[s] = s
 	return s
 }
 
 // Len returns the number of distinct interned strings.
 func (in *Interner) Len() int {
-	in.mu.RLock()
-	defer in.mu.RUnlock()
-	return len(in.m)
+	n := 0
+	for i := range in.shards {
+		sh := &in.shards[i]
+		sh.mu.RLock()
+		n += len(sh.m)
+		sh.mu.RUnlock()
+	}
+	return n
 }
 
 // Labels interns every name and value in m and returns them as a Labels set.
@@ -122,4 +152,19 @@ func (ls Labels) String() string {
 		b.WriteString(`"`)
 	}
 	return b.String()
+}
+
+// Bytes returns the total length of every interned string, which is the
+// label memory the whole fleet shares.
+func (in *Interner) Bytes() int {
+	n := 0
+	for i := range in.shards {
+		sh := &in.shards[i]
+		sh.mu.RLock()
+		for s := range sh.m {
+			n += len(s)
+		}
+		sh.mu.RUnlock()
+	}
+	return n
 }

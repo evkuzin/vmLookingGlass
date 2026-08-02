@@ -26,12 +26,7 @@ func TestInternDedupRatio(t *testing.T) {
 		in.Labels(tgt.Labels)
 	}
 
-	var internedBytes int
-	in.mu.RLock()
-	for s := range in.m {
-		internedBytes += len(s)
-	}
-	in.mu.RUnlock()
+	internedBytes := in.Bytes()
 
 	ratio := float64(rawBytes) / float64(internedBytes)
 	t.Logf("targets=%d pairs=%d unique=%d raw=%.1fMB interned=%.3fMB ratio=%.0fx",

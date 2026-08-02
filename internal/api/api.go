@@ -23,6 +23,7 @@ type API struct {
 	store   *store.Store
 	log     *slog.Logger
 	metrics http.Handler
+	pprof   bool
 }
 
 func New(s *store.Store, log *slog.Logger) *API {
@@ -50,6 +51,9 @@ func (a *API) Handler() http.Handler {
 	if a.metrics != nil {
 		mux.Handle("GET /metrics", a.metrics)
 	}
+	if a.pprof {
+		registerPprof(mux)
+	}
 	return methodGuard(mux)
 }
 
@@ -64,6 +68,9 @@ func methodGuard(next http.Handler) http.Handler {
 		"/-/healthy":           true,
 		"/-/ready":             true,
 		"/metrics":             true,
+	}
+	for _, p := range pprofPaths {
+		known[p] = true
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && known[r.URL.Path] {

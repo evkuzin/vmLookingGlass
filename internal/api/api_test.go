@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -384,5 +385,37 @@ func TestUnknownPath(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/nonexistent", http.NoBody))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+// Profiling is off unless asked for: the endpoints expose runtime internals
+// and collecting a profile is expensive.
+func TestPprofDisabledByDefault(t *testing.T) {
+	_, h := testServer(t)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/pprof/", http.NoBody))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 when profiling is not enabled", rec.Code)
+	}
+}
+
+func TestPprofEnabled(t *testing.T) {
+	s := store.New()
+	h := New(s, discardLogger()).WithPprof().Handler()
+
+	for _, path := range []string{"/debug/pprof/", "/debug/pprof/cmdline"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, http.NoBody))
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: status = %d, want 200", path, rec.Code)
+		}
+	}
+	// The index links to the runtime profiles, which is what makes it usable.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/pprof/", http.NoBody))
+	for _, want := range []string{"heap", "goroutine", "allocs"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("pprof index does not offer %q", want)
+		}
 	}
 }

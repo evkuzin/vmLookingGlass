@@ -26,6 +26,7 @@ func main() {
 	configPath := flag.String("config", "/etc/vmlookingglass/config.yml", "path to the config file")
 	listen := flag.String("listen", "", "HTTP listen address, overriding the config")
 	logLevel := flag.String("log-level", "info", "log level: debug, info, warn or error")
+	enablePprof := flag.Bool("pprof", false, "serve runtime profiles under /debug/pprof")
 	flag.Parse()
 
 	log, err := newLogger(*logLevel)
@@ -34,13 +35,13 @@ func main() {
 		os.Exit(2)
 	}
 
-	if err := run(*configPath, *listen, log); err != nil {
+	if err := run(*configPath, *listen, *enablePprof, log); err != nil {
 		log.Error("exiting", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(configPath, listenOverride string, log *slog.Logger) error {
+func run(configPath, listenOverride string, enablePprof bool, log *slog.Logger) error {
 	watcher, err := config.NewWatcher(configPath, log)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -72,9 +73,15 @@ func run(configPath, listenOverride string, log *slog.Logger) error {
 		d.Run(ctx, cfg)
 	}()
 
+	handler := api.New(d.Store(), log).WithMetrics(d.Metrics().Handler())
+	if enablePprof {
+		handler = handler.WithPprof()
+		log.Info("profiling enabled", "path", "/debug/pprof")
+	}
+
 	srv := &http.Server{
 		Addr:              listen,
-		Handler:           api.New(d.Store(), log).WithMetrics(d.Metrics().Handler()).Handler(),
+		Handler:           handler.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

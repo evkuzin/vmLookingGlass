@@ -3,7 +3,8 @@
 *.test
 *.out
 node_modules/
-web/ui/dist/
+web/ui/dist/*
+!web/ui/dist/.gitkeep
 
 # Local generated config with real host names.
 /config.yml

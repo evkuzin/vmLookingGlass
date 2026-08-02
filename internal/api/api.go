@@ -24,10 +24,18 @@ type API struct {
 	log     *slog.Logger
 	metrics http.Handler
 	pprof   bool
+	ui      http.Handler
 }
 
 func New(s *store.Store, log *slog.Logger) *API {
 	return &API{store: s, log: log}
+}
+
+// WithUI serves the web interface at the root. Without it the root is not
+// served, which is the case for a binary built without the UI assets.
+func (a *API) WithUI(h http.Handler) *API {
+	a.ui = h
+	return a
 }
 
 // WithMetrics attaches the /metrics handler. Without it the endpoint is not
@@ -53,6 +61,16 @@ func (a *API) Handler() http.Handler {
 	}
 	if a.pprof {
 		registerPprof(mux)
+	}
+	if a.ui != nil {
+		// The UI catches every path no API route claimed, so a bookmarked
+		// view loads on a full page request.
+		mux.Handle("GET /", a.ui)
+		// An unclaimed path under the API prefix is a mistyped endpoint, not
+		// a UI route; answering it with HTML would hide the mistake.
+		mux.HandleFunc("GET /api/", func(w http.ResponseWriter, r *http.Request) {
+			writeError(w, http.StatusNotFound, "unknown endpoint %q", r.URL.Path)
+		})
 	}
 	return methodGuard(mux)
 }

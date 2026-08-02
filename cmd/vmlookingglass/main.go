@@ -17,6 +17,7 @@ import (
 	"github.com/evkuzin/vmLookingGlass/internal/api"
 	"github.com/evkuzin/vmLookingGlass/internal/config"
 	"github.com/evkuzin/vmLookingGlass/internal/daemon"
+	"github.com/evkuzin/vmLookingGlass/web"
 )
 
 // shutdownTimeout bounds how long in-flight HTTP requests may take to finish.
@@ -74,6 +75,11 @@ func run(configPath, listenOverride string, enablePprof bool, log *slog.Logger) 
 	}()
 
 	handler := api.New(d.Store(), log).WithMetrics(d.Metrics().Handler())
+	if web.Available() {
+		handler = handler.WithUI(web.Handler())
+	} else {
+		log.Warn("no web UI embedded; serving the API only")
+	}
 	if enablePprof {
 		handler = handler.WithPprof()
 		log.Info("profiling enabled", "path", "/debug/pprof")

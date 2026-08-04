@@ -154,7 +154,11 @@ func (a *Agent) normalize() error {
 	if u.Host == "" {
 		return fmt.Errorf("invalid url %q: missing host", a.URL)
 	}
-	if u.Port() == "" {
+	// vmagent's port is only assumed for plain HTTP. An https endpoint is
+	// behind a load balancer or ingress rather than on vmagent's own
+	// listener, so it keeps the scheme's default port. Either can be
+	// overridden by naming the port in the URL.
+	if u.Scheme == "http" && u.Port() == "" {
 		u.Host = fmt.Sprintf("%s:%d", u.Host, DefaultPort)
 	}
 	u.Path = ""

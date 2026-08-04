@@ -125,3 +125,30 @@ agents:
 		t.Fatalf("got %d agents, want 2", len(c.Agents))
 	}
 }
+
+// The default port belongs to vmagent's own listener. A URL that named a
+// scheme but no port was getting it too, so an https endpoint behind a load
+// balancer was addressed on the wrong port.
+func TestSchemeDefaultPort(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"https://prom.example", "https://prom.example"},
+		{"http://prom.example", "http://prom.example:8429"},
+		{"https://prom.example:9090", "https://prom.example:9090"},
+		{"https://prom.example:443", "https://prom.example:443"},
+		// Shorthand still means a vmagent, which listens on its own port.
+		{"host", "http://host:8429"},
+		{"host:9090", "http://host:9090"},
+	}
+	for _, tt := range tests {
+		a := Agent{URL: tt.in}
+		if err := a.normalize(); err != nil {
+			t.Errorf("normalize(%q): %v", tt.in, err)
+			continue
+		}
+		if a.URL != tt.want {
+			t.Errorf("normalize(%q) = %q, want %q", tt.in, a.URL, tt.want)
+		}
+	}
+}

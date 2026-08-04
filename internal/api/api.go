@@ -77,7 +77,7 @@ func (a *API) Handler() http.Handler {
 			writeError(w, http.StatusNotFound, "unknown endpoint %q", r.URL.Path)
 		})
 	}
-	return methodGuard(mux)
+	return compress(methodGuard(mux))
 }
 
 // methodGuard converts a pattern miss on a known path into 405. Go's mux

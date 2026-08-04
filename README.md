@@ -20,7 +20,7 @@ to every target.
 ## Running
 
 ```sh
-vmlookingglass -config /etc/vmlookingglass/config.yml
+vmlookingglass -config /etc/vmLookingGlass/config.yml
 ```
 
 See `misc/config.example.yml` for the configuration format and

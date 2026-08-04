@@ -8,7 +8,7 @@ Wants=network-online.target
 Type=simple
 User=vmlookingglass
 Group=vmlookingglass
-ExecStart=/usr/bin/vmlookingglass -config /etc/vmlookingglass/config.yml
+ExecStart=/usr/bin/vmlookingglass -config /etc/vmLookingGlass/config.yml
 
 # The config is reloaded when the file changes, so a restart is only needed
 # for flag changes.
@@ -36,7 +36,7 @@ SystemCallErrorNumber=EPERM
 
 # The watcher tracks the directory rather than the file, so the whole
 # directory has to be readable.
-ReadOnlyPaths=/etc/vmlookingglass
+ReadOnlyPaths=/etc/vmLookingGlass
 
 [Install]
 WantedBy=multi-user.target

@@ -75,7 +75,7 @@ RUN --mount=type=secret,id=build_ca \
     apk --no-cache add ca-certificates && \
     addgroup -g 1000 vmlg && \
     adduser -D -u 1000 -G vmlg vmlg && \
-    mkdir -p /etc/vmlookingglass && chown vmlg:vmlg /etc/vmlookingglass
+    mkdir -p /etc/vmLookingGlass && chown vmlg:vmlg /etc/vmLookingGlass
 
 COPY --from=builder /out/vmlookingglass /out/vmlg /usr/bin/
 
@@ -83,4 +83,4 @@ USER vmlg
 EXPOSE 8880
 
 ENTRYPOINT ["/usr/bin/vmlookingglass"]
-CMD ["-config", "/etc/vmlookingglass/config.yml"]
+CMD ["-config", "/etc/vmLookingGlass/config.yml"]

@@ -14,3 +14,7 @@ web/ui/dist/*
 
 # Local build settings; see .env.example.
 .env
+
+# Site-specific config generation: inventory queries, cluster names and
+# hostnames belong to a deployment, not to this repo.
+/local/

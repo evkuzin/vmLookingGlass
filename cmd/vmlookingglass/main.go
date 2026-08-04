@@ -24,7 +24,7 @@ import (
 const shutdownTimeout = 10 * time.Second
 
 func main() {
-	configPath := flag.String("config", "/etc/vmlookingglass/config.yml", "path to the config file")
+	configPath := flag.String("config", "/etc/vmLookingGlass/config.yml", "path to the config file")
 	listen := flag.String("listen", "", "HTTP listen address, overriding the config")
 	logLevel := flag.String("log-level", "info", "log level: debug, info, warn or error")
 	enablePprof := flag.Bool("pprof", false, "serve runtime profiles under /debug/pprof")

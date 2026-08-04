@@ -102,8 +102,19 @@ func parseOne(expr string) (matcher, error) {
 	case strings.HasPrefix(expr, "lastSamplesScraped"):
 		return parseIntCmp(expr)
 	}
-	return nil, fmt.Errorf("unknown filter")
+
+	// Every other filter names its field bare, so a label is easy to write
+	// without its prefix. Say what to write instead rather than only that
+	// this is wrong.
+	if name, _, ok := strings.Cut(expr, "="); ok && name != "" {
+		return nil, fmt.Errorf("unknown filter; for a label write labels.%s, "+
+			"otherwise one of: %s", strings.TrimSuffix(name, "!"), filterFields)
+	}
+	return nil, fmt.Errorf("unknown filter; expected one of: labels.<name>, %s", filterFields)
 }
+
+// filterFields lists the non-label filters, for error messages.
+const filterFields = "agent, health, lastSamplesScraped, lastScrapeDuration, scrapePool, state"
 
 // labelMatcher tests one label against a pattern.
 type labelMatcher struct {

@@ -80,6 +80,37 @@ func columnNames() string {
 	return strings.Join(names, ", ")
 }
 
+// usage explains the parts of the filter syntax that are not guessable:
+// filters combine, labels need a prefix, and values are bare regexes whose
+// anchoring differs between = and =~.
+const usage = `usage: vmlg [flags] [filter ...]
+
+Several filters combine, and a target has to match all of them:
+
+  vmlg labels.job=node health=down
+
+By label. Every label needs the labels. prefix, including instance and job:
+
+  labels.instance=host042:9100   the whole value
+  labels.instance=~042           contains it anywhere
+  labels.job!~redis              does not contain it, or has no such label
+  labels.env=prod|staging        either, since the value is a regex
+
+By target:
+
+  health=down                    up, down or unknown
+  state=dropped                  active, dropped or any
+  agent=vmagent01                any agent scraping the target
+  scrapePool=consul.*            the whole name, so anchor with .*
+  lastScrapeDuration>1           seconds; also < >= <= == !=
+  lastSamplesScraped<100         sample count
+
+Values are regular expressions and are not quoted. = has to match the whole
+value, so prefer =~ for a substring rather than wrapping it in .* yourself.
+
+Flags:
+`
+
 // filterList collects a repeatable -filter flag.
 type filterList []string
 
@@ -106,11 +137,7 @@ func Run(args []string, out io.Writer) error {
 	timeout := fs.Duration("timeout", defaultTimeout, "request timeout")
 
 	fs.Usage = func() {
-		fmt.Fprintf(out, "usage: vmlg [flags] [filter ...]\n\n"+
-			"Filters use the same syntax as the server, for example:\n"+
-			"  labels.job=node        health=down        agent=vmagent01\n"+
-			"  labels.env=~prod       scrapePool=consul.*  lastSamplesScraped>1000\n\n"+
-			"Flags:\n")
+		fmt.Fprint(out, usage)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {

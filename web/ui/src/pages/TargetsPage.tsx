@@ -23,10 +23,11 @@ import {
 import { useState, type FC } from "react";
 import { StringParam, useQueryParam, withDefault } from "use-query-params";
 
+import { FilterHelp } from "../components/FilterHelp";
 import { nextSort, SortHeaders, type SortColumn, type SortState } from "../components/SortHeader";
 
 import { useAPI } from "../api/api";
-import type { AgentsResult, SearchResult, Target } from "../api/types";
+import type { AgentsResult, ScrapePoolsResult, SearchResult, Target } from "../api/types";
 import { HealthBadge } from "../components/HealthBadge";
 import { LabelBadges } from "../components/LabelBadges";
 import { formatCount, formatDuration, formatRelative } from "../lib/format";
@@ -191,15 +192,32 @@ const columns: SortColumn<Target>[] = [
   { key: "samples", label: "Samples", value: () => 0, descFirst: true },
 ];
 
-const examples = [
-  "health=down",
-  "labels.job=node",
-  "agent=vmagent01",
-  "state=dropped",
-  "lastScrapeDuration>1",
-];
+// Chosen to demonstrate the syntax rather than to be useful queries: two
+// filters combining, the labels. prefix, a substring match, and a numeric
+// comparison.
+//
+// The agent and pool examples name something from this fleet, since a real
+// value shows the expected form better than a placeholder does and the
+// example is worth clicking.
+function buildExamples(agent: string, pool: string): string[] {
+  const out = ["health=down", "labels.job=node health=down", "state=dropped"];
+  if (agent) {
+    out.push(`agent=${agent}`);
+  }
+  if (pool) {
+    // Anchored, so a bare prefix would not match: the .* is the point.
+    out.push(`scrapePool=${pool}.*`);
+  }
+  out.push("lastScrapeDuration>1");
+  return out;
+}
 
 export const TargetsPage: FC = () => {
+  // Shares the cache entry with the fleet stats above, so naming a real
+  // agent in the examples costs no extra request.
+  const { data: fleet } = useAPI<AgentsResult>([], "agents");
+  const { data: pools } = useAPI<ScrapePoolsResult>([], "scrape_pools");
+
   const [filter, setFilter] = useQueryParam("filter", withDefault(StringParam, ""));
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState<SortState>({ by: "", desc: false });
@@ -234,6 +252,12 @@ export const TargetsPage: FC = () => {
     setPage(1);
   };
 
+  // A healthy agent is a better example than a failing one, whose targets are
+  // stale and whose name may be about to disappear from the config.
+  const exampleAgent = fleet?.agents.find((a) => a.healthy)?.name ?? "";
+  const examplePool = pools?.scrapePools[0] ?? "";
+  const examples = buildExamples(exampleAgent, examplePool);
+
   return (
     <Stack gap="lg">
       <Card withBorder padding="md">
@@ -242,7 +266,7 @@ export const TargetsPage: FC = () => {
 
       <TextInput
         size="md"
-        placeholder="Filter targets, e.g. health=down labels.job=node"
+        placeholder="Filter targets, e.g. labels.job=node health=down"
         leftSection={<IconSearch size={16} />}
         value={filter}
         onChange={(e) => apply(e.currentTarget.value)}
@@ -257,12 +281,17 @@ export const TargetsPage: FC = () => {
             {e}
           </Button>
         ))}
+        <FilterHelp />
       </Group>
 
       {!enabled && (
-        <Text c="dimmed" ta="center" py="xl">
-          Enter a filter to search targets across every agent.
-        </Text>
+        <Stack align="center" gap={4} py="xl">
+          <Text c="dimmed">Enter a filter to search targets across every agent.</Text>
+          <Text size="xs" c="dimmed">
+            Filters combine with a space, and labels need the labels. prefix,
+            as in labels.instance=~042
+          </Text>
+        </Stack>
       )}
 
       {error && (

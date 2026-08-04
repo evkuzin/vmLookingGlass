@@ -1,6 +1,7 @@
 package search
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/evkuzin/vmLookingGlass/internal/model"
@@ -316,5 +317,33 @@ func TestQueryString(t *testing.T) {
 	q := mustParse(t, "labels.job=node", "health=up")
 	if got := q.String(); got != "labels.job=node health=up" {
 		t.Errorf("String() = %q", got)
+	}
+}
+
+// Omitting the labels. prefix is the likeliest mistake, since every other
+// filter names its field bare. The error has to say what to write instead.
+func TestUnknownFilterSuggestsLabelPrefix(t *testing.T) {
+	for _, expr := range []string{"instance=host042", "job=node", "env=~prod"} {
+		_, err := Parse([]string{expr})
+		if err == nil {
+			t.Fatalf("%q parsed, want an error", expr)
+		}
+		if !strings.Contains(err.Error(), "labels.") {
+			t.Errorf("%q: error %q does not mention the labels. prefix", expr, err)
+		}
+	}
+}
+
+// An unknown field that is not a label should list what is available rather
+// than only saying no.
+func TestUnknownFilterListsFields(t *testing.T) {
+	_, err := Parse([]string{"nosuchfield=x"})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	for _, want := range []string{"health", "agent", "scrapePool", "state"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
 	}
 }

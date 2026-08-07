@@ -10,6 +10,7 @@ type row = {
 const labelRows: row[] = [
   { filter: 'labels.instance=host042:9100', meaning: "label equals this exactly" },
   { filter: "labels.instance=~042", meaning: "label contains this anywhere" },
+  { filter: "labels.job!=redis", meaning: "label is anything else, or is absent" },
   { filter: "labels.job!~redis", meaning: "label does not contain it, or is absent" },
   { filter: "labels.env=prod|staging", meaning: "either, since the value is a regex" },
 ];

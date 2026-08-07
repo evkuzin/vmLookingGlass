@@ -47,8 +47,9 @@ Filters match the syntax of the existing standalone finder:
 | Filter | Meaning |
 | --- | --- |
 | `labels.<name>=<regex>` | label matches the whole pattern |
+| `labels.<name>!=<regex>` | label does not match the whole pattern, including when absent |
 | `labels.<name>=~<regex>` | label contains a match |
-| `labels.<name>!~<regex>` | label does not match, including when absent |
+| `labels.<name>!~<regex>` | label does not contain a match, including when absent |
 | `scrapePool=<regex>` | scrape pool matches the whole pattern |
 | `agent=<regex>` | any agent scraping the target matches |
 | `health=up\|down\|unknown` | exact health, not a pattern |

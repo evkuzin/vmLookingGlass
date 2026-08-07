@@ -93,6 +93,7 @@ By label. Every label needs the labels. prefix, including instance and job:
 
   labels.instance=host042:9100   the whole value
   labels.instance=~042           contains it anywhere
+  labels.job!=redis              is anything else, or has no such label
   labels.job!~redis              does not contain it, or has no such label
   labels.env=prod|staging        either, since the value is a regex
 

@@ -238,6 +238,24 @@ func TestSearchFilters(t *testing.T) {
 	}
 }
 
+// != reaches the API as a label operator rather than being read as part of
+// the label name, which would match nothing and report no error.
+func TestSearchNegatedLabelFilter(t *testing.T) {
+	_, h := testServer(t)
+	_, body := get(t, h, "/api/v1/search?filter=labels.job%21%3Dredis")
+
+	data := body["data"].(map[string]any)
+	if got := data["total"]; got != float64(2) {
+		t.Fatalf("total = %v, want 2 (both node targets)", got)
+	}
+	for _, tgt := range data["targets"].([]any) {
+		labels := tgt.(map[string]any)["labels"].(map[string]any)
+		if labels["job"] == "redis" {
+			t.Errorf("labels.job!=redis returned a redis target")
+		}
+	}
+}
+
 func TestSearchMultipleFilters(t *testing.T) {
 	_, h := testServer(t)
 	_, body := get(t, h, "/api/v1/search?filter=labels.job%3Dnode&filter=agent%3Dagent01")

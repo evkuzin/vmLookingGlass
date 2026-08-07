@@ -94,6 +94,29 @@ func TestLabelNegatedRegexMatch(t *testing.T) {
 	}
 }
 
+// != is the negation of =, so it is anchored where !~ is a substring search.
+func TestLabelNegatedExactMatch(t *testing.T) {
+	e := entry("a1", "p", "http://h/m", map[string]string{"job": "node_exporter"})
+
+	tests := []struct {
+		expr string
+		want bool
+	}{
+		{"labels.job!=redis", true},
+		{"labels.job!=node_exporter", false},
+		{"labels.job!=node", true},         // anchored, so a substring still differs
+		{"labels.job!~node", false},        // whereas !~ finds it anywhere
+		{"labels.job!=node|redis", true},   // neither alternative is the whole value
+		{"labels.missing!=anything", true}, // an absent label cannot equal it
+	}
+	for _, tt := range tests {
+		q := mustParse(t, tt.expr)
+		if got := q.Match(in, e); got != tt.want {
+			t.Errorf("%s = %v, want %v", tt.expr, got, tt.want)
+		}
+	}
+}
+
 func TestScrapePoolFilter(t *testing.T) {
 	e := entry("a1", "consul-services", "http://h/m", nil)
 

@@ -133,10 +133,13 @@ func (m *labelMatcher) match(in *model.Interner, e *store.Entry) bool {
 	return got != m.negated
 }
 
-// parseLabel handles labels.<name>=<regex>, =~ and !~.
+// parseLabel handles labels.<name> followed by =, !=, =~ or !~.
 //
-// "=" anchors the pattern against the whole value while "=~" and "!~" search
-// for it anywhere, matching the behavior of the original tool.
+// "=" and "!=" anchor the pattern against the whole value while "=~" and "!~"
+// search for it anywhere, matching the behavior of the original tool.
+//
+// "!=" is tested before "=" so that it is read as the operator rather than as
+// a label name ending in "!", which would match nothing and report no error.
 func parseLabel(expr string) (matcher, error) {
 	rest := strings.TrimPrefix(expr, "labels.")
 
@@ -148,11 +151,15 @@ func parseLabel(expr string) (matcher, error) {
 	case strings.Contains(rest, "!~"):
 		name, pattern, _ = strings.Cut(rest, "!~")
 		negated = true
+	case strings.Contains(rest, "!="):
+		name, pattern, _ = strings.Cut(rest, "!=")
+		negated = true
+		anchored = true
 	case strings.Contains(rest, "="):
 		name, pattern, _ = strings.Cut(rest, "=")
 		anchored = true
 	default:
-		return nil, fmt.Errorf("expected =, =~ or !~")
+		return nil, fmt.Errorf("expected =, !=, =~ or !~")
 	}
 
 	if name == "" {

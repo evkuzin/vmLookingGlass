@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+     stroke="#228be6" stroke-width="3.5" stroke-linecap="round">
+  <!-- A magnifier, matching the Tabler set the UI draws its icons from, but
+       with colours baked in: a favicon has no inherited currentColor, and the
+       tab strip follows the browser theme rather than the page's. -->
+  <style>
+    /* The default blue is dark enough to disappear against a dark tab strip. */
+    @media (prefers-color-scheme: dark) { svg { stroke: #4dabf7 } }
+  </style>
+  <!-- Sized to fill the box: at 16px a glyph inset the way a 24px UI icon is
+       loses most of its pixels to padding. The lens fill keeps the disc from
+       reading as an empty ring once antialiasing softens the stroke. -->
+  <circle cx="9.25" cy="9.25" r="7.25" fill="#228be6" fill-opacity="0.2"/>
+  <path d="M14.6 14.6l7.3 7.3"/>
+</svg>

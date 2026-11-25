@@ -46,13 +46,13 @@ type agentTask struct {
 	done   chan struct{}
 }
 
-// defaultConcurrency bounds in-flight polls when the config does not.
-// Decoding a large agent response is CPU-bound, so the useful limit tracks
-// available cores rather than agent count.
+// defaultConcurrency bounds in-flight polls when the config does not. Decoding
+// is CPU-bound, so it tracks available cores rather than agent count; GOMAXPROCS
+// follows a container's CPU quota, NumCPU does not.
 func defaultConcurrency() int {
-	n := runtime.NumCPU()
-	if n < 4 {
-		return 4
+	n := runtime.GOMAXPROCS(0)
+	if n < 2 {
+		return 2
 	}
 	return n
 }

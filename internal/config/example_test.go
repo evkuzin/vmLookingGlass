@@ -57,4 +57,31 @@ func TestExampleConfigIsValid(t *testing.T) {
 	if c.Interval < time.Second {
 		t.Errorf("example interval %v is unrealistically short", c.Interval)
 	}
+
+	if want := 16; c.MaxConcurrency != want {
+		t.Errorf("example max_concurrency = %d, want %d", c.MaxConcurrency, want)
+	}
+
+	n := c.Netbox
+	if n == nil {
+		t.Fatal("example does not show the netbox block")
+	}
+	if want := "https://netbox.hudson-trading.com/api"; n.URL != want {
+		t.Errorf("netbox url = %q, want %q", n.URL, want)
+	}
+	if len(n.Tags) == 0 {
+		t.Error("example netbox block has no tags")
+	}
+	if want := "test|vmti"; n.Exclude != want {
+		t.Errorf("netbox exclude = %q, want %q", n.Exclude, want)
+	}
+	if want := 30 * time.Minute; n.Interval != want {
+		t.Errorf("netbox interval = %v, want %v", n.Interval, want)
+	}
+	if want := 45 * time.Second; n.Timeout != want {
+		t.Errorf("netbox timeout = %v, want %v", n.Timeout, want)
+	}
+	if len(n.Labels) == 0 {
+		t.Error("example netbox block does not demonstrate labels")
+	}
 }

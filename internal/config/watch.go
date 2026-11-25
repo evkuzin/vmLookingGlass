@@ -2,8 +2,11 @@ package config
 
 import (
 	"context"
+	"crypto/sha256"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -19,6 +22,7 @@ const debounceDelay = 250 * time.Millisecond
 type Watcher struct {
 	path    string
 	current atomic.Pointer[Config]
+	hash    [sha256.Size]byte
 	log     *slog.Logger
 
 	// onReload is called after a successful reload, for tests and subscribers.
@@ -32,11 +36,15 @@ func NewWatcher(path string, log *slog.Logger) (*Watcher, error) {
 	if err != nil {
 		return nil, err
 	}
-	c, err := Load(abs)
+	data, err := os.ReadFile(abs)
 	if err != nil {
 		return nil, err
 	}
-	w := &Watcher{path: abs, log: log}
+	c, err := Parse(data)
+	if err != nil {
+		return nil, err
+	}
+	w := &Watcher{path: abs, hash: sha256.Sum256(data), log: log}
 	w.current.Store(c)
 	return w, nil
 }
@@ -52,7 +60,9 @@ func (w *Watcher) OnReload(f func(*Config)) { w.onReload = f }
 //
 // The parent directory is watched rather than the file itself: generators
 // typically write a temp file and rename it over the target, which replaces
-// the inode and would leave a file-level watch bound to the old one.
+// the inode and would leave a file-level watch bound to the old one. A
+// Kubernetes ConfigMap volume swaps a ..data symlink instead, so any event in
+// the directory is a candidate and the content decides whether it changed.
 func (w *Watcher) Run(ctx context.Context) error {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -78,15 +88,17 @@ func (w *Watcher) Run(ctx context.Context) error {
 			if !ok {
 				return nil
 			}
-			if filepath.Clean(event.Name) != w.path {
-				continue
-			}
 			if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) == 0 {
 				continue
 			}
+			// Every event is a wake-up, but only the watched file or
+			// kubelet's ..data swap may push a pending reload back: a
+			// sibling written more often than the delay would otherwise
+			// postpone it forever.
 			if timer == nil {
 				timer = time.NewTimer(debounceDelay)
-			} else {
+			} else if event.Name == w.path ||
+				strings.HasPrefix(filepath.Base(event.Name), "..data") {
 				timer.Reset(debounceDelay)
 			}
 			timerC = timer.C
@@ -98,7 +110,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 			w.log.Error("config watch error", "err", err)
 
 		case <-timerC:
-			timerC = nil
+			timer, timerC = nil, nil
 			w.reload()
 		}
 	}
@@ -107,12 +119,26 @@ func (w *Watcher) Run(ctx context.Context) error {
 // reload parses the file and swaps it in. A parse failure is logged and the
 // previous config is retained, so a bad write cannot take the daemon down.
 func (w *Watcher) reload() {
-	c, err := Load(w.path)
+	data, err := os.ReadFile(w.path)
 	if err != nil {
 		w.log.Error("config reload failed, keeping previous config",
 			"path", w.path, "err", err)
 		return
 	}
+	// Content, not inode and mtime: a replacement with the same bytes would
+	// otherwise reload and log "config applied" for nothing.
+	hash := sha256.Sum256(data)
+	if hash == w.hash {
+		return
+	}
+	c, err := Parse(data)
+	if err != nil {
+		w.log.Error("config reload failed, keeping previous config",
+			"path", w.path, "err", err)
+		return
+	}
+	// The hash mirrors the applied config, so a repeated bad write is retried.
+	w.hash = hash
 	w.current.Store(c)
 	w.log.Info("config reloaded", "path", w.path, "agents", len(c.Agents))
 	if w.onReload != nil {

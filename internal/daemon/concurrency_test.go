@@ -4,12 +4,44 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/evkuzin/vmLookingGlass/internal/config"
 )
+
+// An unset max_concurrency falls back to the CPU budget the process actually
+// has, which inside a container is the cgroup quota rather than the host's
+// cores.
+func TestDefaultConcurrencyFollowsGOMAXPROCS(t *testing.T) {
+	prev := runtime.GOMAXPROCS(0)
+	t.Cleanup(func() { runtime.GOMAXPROCS(prev) })
+
+	want := runtime.NumCPU() + 1
+	runtime.GOMAXPROCS(want)
+	if got := defaultConcurrency(); got != want {
+		t.Errorf("defaultConcurrency() = %d with GOMAXPROCS = %d, want %d", got, want, want)
+	}
+	if got := concurrencyLimit(0); got != want {
+		t.Errorf("concurrencyLimit(0) = %d with GOMAXPROCS = %d, want %d", got, want, want)
+	}
+
+	runtime.GOMAXPROCS(1)
+	if got := defaultConcurrency(); got != 2 {
+		t.Errorf("defaultConcurrency() = %d with GOMAXPROCS = 1, want the floor of 2", got)
+	}
+}
+
+// A positive max_concurrency is used as given, with no floor or scaling.
+func TestConcurrencyLimitUsesConfiguredValue(t *testing.T) {
+	for _, n := range []int{1, 3, 16} {
+		if got := concurrencyLimit(n); got != n {
+			t.Errorf("concurrencyLimit(%d) = %d, want %d", n, got, n)
+		}
+	}
+}
 
 // A fleet-sized poll must not open every connection at once: agents that all
 // fire together starve each other and time out, even though each responds

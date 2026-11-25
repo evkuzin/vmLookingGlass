@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/evkuzin/vmLookingGlass/internal/model"
+	"github.com/evkuzin/vmLookingGlass/internal/netbox"
 	"github.com/evkuzin/vmLookingGlass/internal/poll"
 	"github.com/evkuzin/vmLookingGlass/internal/store"
 )
@@ -110,6 +111,36 @@ func TestPollCountersByOutcome(t *testing.T) {
 	if got := sampleValue(t, body, "vmlookingglass_agent_polls_total",
 		`agent="agent01"`, `result="error"`); got != "1" {
 		t.Errorf("error count = %s, want 1", got)
+	}
+}
+
+func TestNetboxRefreshMetrics(t *testing.T) {
+	m := New(prometheus.NewRegistry(), store.New(in), in)
+
+	body := scrape(t, m)
+	if got := sampleValue(t, body, "vmlookingglass_netbox_devices"); got != "0" {
+		t.Errorf("devices before the first refresh = %s, want 0", got)
+	}
+	if got := sampleValue(t, body, "vmlookingglass_netbox_last_success_timestamp_seconds"); got != "0" {
+		t.Errorf("last success before the first refresh = %s, want 0", got)
+	}
+
+	m.RecordNetboxRefresh(netbox.Refresh{Outcome: netbox.OutcomeOK, Names: []string{"a", "b"}})
+	m.RecordNetboxRefresh(netbox.Refresh{Outcome: netbox.OutcomeError})
+	m.RecordNetboxRefresh(netbox.Refresh{Outcome: netbox.OutcomeRejected, Previous: 10, Next: 4})
+
+	body = scrape(t, m)
+	for _, result := range []string{"ok", "error", "rejected"} {
+		if got := sampleValue(t, body, "vmlookingglass_netbox_refreshes_total",
+			`result="`+result+`"`); got != "1" {
+			t.Errorf("%s refreshes = %s, want 1", result, got)
+		}
+	}
+	if got := sampleValue(t, body, "vmlookingglass_netbox_devices"); got != "2" {
+		t.Errorf("devices = %s, want the last successful set of 2", got)
+	}
+	if got := sampleValue(t, body, "vmlookingglass_netbox_last_success_timestamp_seconds"); got == "0" {
+		t.Error("last success not recorded after a successful refresh")
 	}
 }
 

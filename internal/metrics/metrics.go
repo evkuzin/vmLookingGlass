@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/evkuzin/vmLookingGlass/internal/model"
+	"github.com/evkuzin/vmLookingGlass/internal/netbox"
 	"github.com/evkuzin/vmLookingGlass/internal/poll"
 	"github.com/evkuzin/vmLookingGlass/internal/store"
 )
@@ -23,6 +24,10 @@ type Metrics struct {
 
 	polls        *prometheus.CounterVec
 	pollDuration *prometheus.HistogramVec
+
+	netboxRefreshes   *prometheus.CounterVec
+	netboxDevices     prometheus.Gauge
+	netboxLastSuccess prometheus.Gauge
 }
 
 // New registers all metrics against reg.
@@ -46,9 +51,25 @@ func New(reg *prometheus.Registry, s *store.Store, in *model.Interner) *Metrics 
 			// the buckets run from milliseconds to tens of seconds.
 			Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
 		}, []string{"agent"}),
+		netboxRefreshes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "netbox_refreshes_total",
+			Help:      "NetBox inventory refreshes by outcome.",
+		}, []string{"result"}),
+		netboxDevices: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "netbox_devices",
+			Help:      "Devices in the current discovered agent set.",
+		}),
+		netboxLastSuccess: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "netbox_last_success_timestamp_seconds",
+			Help:      "Unix time of the last successful NetBox refresh, 0 until one succeeds.",
+		}),
 	}
 
 	reg.MustRegister(m.polls, m.pollDuration)
+	reg.MustRegister(m.netboxRefreshes, m.netboxDevices, m.netboxLastSuccess)
 	reg.MustRegister(collectors.NewGoCollector())
 	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	reg.MustRegister(&snapshotCollector{store: s, interner: in})
@@ -68,6 +89,18 @@ func (m *Metrics) RecordPoll(r poll.AgentResult) {
 	}
 	m.polls.WithLabelValues(r.Status.Name, result).Inc()
 	m.pollDuration.WithLabelValues(r.Status.Name).Observe(r.Status.Duration.Seconds())
+}
+
+// RecordNetboxRefresh accounts for one inventory refresh. The current-set
+// gauges only move on a success; a failed or rejected refresh leaves them at
+// the set still in use.
+func (m *Metrics) RecordNetboxRefresh(r netbox.Refresh) {
+	m.netboxRefreshes.WithLabelValues(string(r.Outcome)).Inc()
+	if r.Outcome != netbox.OutcomeOK {
+		return
+	}
+	m.netboxDevices.Set(float64(len(r.Names)))
+	m.netboxLastSuccess.SetToCurrentTime()
 }
 
 func desc(name, help string, labels ...string) *prometheus.Desc {

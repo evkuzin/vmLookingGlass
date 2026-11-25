@@ -58,7 +58,19 @@ func run(configPath, listenOverride string, enablePprof bool, log *slog.Logger) 
 	defer stop()
 
 	d := daemon.New(log)
-	watcher.OnReload(d.Reload)
+	coord := newAgentCoordinator(cfg, d.Reload, d.Metrics(), log)
+	watcher.OnReload(coord.fileConfig)
+
+	// Run must store its context before the watcher or the refresher can
+	// deliver a reload, since Reload is a no-op until then. The window before
+	// Run's first statement is microseconds against a NetBox round trip.
+	daemonDone := make(chan struct{})
+	go func() {
+		defer close(daemonDone)
+		d.Run(ctx, coord.merged())
+	}()
+
+	coord.Start()
 
 	watchDone := make(chan struct{})
 	go func() {
@@ -66,12 +78,6 @@ func run(configPath, listenOverride string, enablePprof bool, log *slog.Logger) 
 		if err := watcher.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error("config watcher stopped", "err", err)
 		}
-	}()
-
-	daemonDone := make(chan struct{})
-	go func() {
-		defer close(daemonDone)
-		d.Run(ctx, cfg)
 	}()
 
 	handler := api.New(d.Store(), log).WithMetrics(d.Metrics().Handler())
@@ -119,6 +125,7 @@ func run(configPath, listenOverride string, enablePprof bool, log *slog.Logger) 
 	stop()
 	<-daemonDone
 	<-watchDone
+	coord.Stop()
 	return nil
 }
 

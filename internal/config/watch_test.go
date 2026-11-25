@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -81,6 +82,67 @@ func TestWatcherReloadsOnRename(t *testing.T) {
 	}
 }
 
+// A ConfigMap volume is ..vN/config.yml plus a ..data symlink that kubelet
+// swaps atomically, so the watched path is a symlink through ..data.
+func TestWatcherReloadsOnSymlinkSwap(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+
+	v1 := filepath.Join(dir, "..v1")
+	if err := os.Mkdir(v1, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(v1, "config.yml"), []byte("agents:\n  - url: a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("..v1", filepath.Join(dir, "..data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("..data/config.yml", path); err != nil {
+		t.Fatal(err)
+	}
+
+	w, reloads := startWatcher(t, path)
+	if got := len(w.Config().Agents); got != 1 {
+		t.Fatalf("initial agents = %d, want 1", got)
+	}
+
+	v2 := filepath.Join(dir, "..v2")
+	if err := os.Mkdir(v2, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(v2, "config.yml"), []byte("agents:\n  - url: a\n  - url: b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tmp := filepath.Join(dir, "..data_tmp")
+	if err := os.Symlink("..v2", tmp); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, filepath.Join(dir, "..data")); err != nil {
+		t.Fatal(err)
+	}
+
+	c := awaitReload(t, reloads)
+	if got := len(c.Agents); got != 2 {
+		t.Errorf("reloaded agents = %d, want 2", got)
+	}
+}
+
+func TestWatcherIgnoresIdenticalRewrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	writeFile(t, path, "agents:\n  - url: a\n")
+
+	_, reloads := startWatcher(t, path)
+
+	writeFile(t, path, "agents:\n  - url: a\n")
+	select {
+	case <-reloads:
+		t.Error("rewriting identical content triggered a reload")
+	case <-time.After(1 * time.Second):
+	}
+}
+
 func TestWatcherKeepsPreviousConfigOnBadWrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yml")
@@ -88,6 +150,14 @@ func TestWatcherKeepsPreviousConfigOnBadWrite(t *testing.T) {
 
 	w, reloads := startWatcher(t, path)
 
+	writeFile(t, path, "agents:\n  - url: ftp://bad\n")
+	select {
+	case <-reloads:
+		t.Fatal("bad config triggered a reload callback")
+	case <-time.After(1 * time.Second):
+	}
+
+	// The same bad write again must be retried, not skipped as a no-op.
 	writeFile(t, path, "agents:\n  - url: ftp://bad\n")
 	select {
 	case <-reloads:
@@ -140,6 +210,43 @@ func TestWatcherIgnoresOtherFiles(t *testing.T) {
 	case <-reloads:
 		t.Error("unrelated file in the watched directory triggered a reload")
 	case <-time.After(1 * time.Second):
+	}
+}
+
+// A sibling written more often than the debounce delay must not push the
+// pending reload of the watched file back indefinitely.
+func TestWatcherSiblingChurnDoesNotPostponeReload(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	writeFile(t, path, "agents:\n  - url: a\n")
+
+	_, reloads := startWatcher(t, path)
+
+	stop := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			writeFile(t, filepath.Join(dir, "churn.yml"), fmt.Sprintf("i: %d\n", i))
+		}
+	}()
+	t.Cleanup(func() {
+		close(stop)
+		<-finished
+	})
+
+	time.Sleep(300 * time.Millisecond)
+	writeFile(t, path, "agents:\n  - url: a\n  - url: b\n")
+
+	select {
+	case <-reloads:
+	case <-time.After(1 * time.Second):
+		t.Fatal("sibling churn postponed the reload of the watched file")
 	}
 }
 

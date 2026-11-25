@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -20,6 +21,12 @@ const targetsPath = "/api/v1/targets?state=any"
 // maxIdleConnsPerHost keeps a connection open per agent between polls, since
 // each agent is polled repeatedly on its own schedule.
 const maxIdleConnsPerHost = 2
+
+// dialTimeout bounds connection setup, TLS included, so a dead host frees its
+// concurrency slot in seconds instead of at the per-agent timeout.
+const dialTimeout = 10 * time.Second
+
+var agentDialer = &net.Dialer{Timeout: dialTimeout}
 
 // Poller fetches target status from a single agent.
 type Poller struct {
@@ -42,6 +49,8 @@ func New(log *slog.Logger) *Poller {
 				MaxIdleConns:        256,
 				MaxIdleConnsPerHost: maxIdleConnsPerHost,
 				IdleConnTimeout:     90 * time.Second,
+				DialContext:         agentDialer.DialContext,
+				TLSHandshakeTimeout: dialTimeout,
 			},
 		},
 	}

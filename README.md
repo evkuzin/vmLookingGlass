@@ -27,10 +27,24 @@ See `misc/config.example.yml` for the configuration format and
 `misc/vmlookingglass.service` for a systemd unit.
 
 The config file is watched: agents that appear start being polled, agents that
-disappear stop, and agents whose settings are unchanged keep going. A file that
-fails to parse is logged and ignored, leaving the previous config in effect.
-Generate it from whatever inventory owns the agent list, writing to a temporary
-file and renaming over the target.
+disappear stop, and agents whose settings are unchanged keep going. A file
+replaced by a symlink swap, as a Kubernetes ConfigMap volume is updated, is
+picked up the same way. A file that fails to parse is logged and ignored,
+leaving the previous config in effect.
+
+### Agent discovery
+
+A `netbox:` block makes the daemon discover agents from the NetBox inventory.
+Each tag under `tags` is queried separately and the results unioned; names
+matching `exclude`, or that do not look like a hostname, are dropped and the
+rest become agents on the default port. Refreshes run every `interval` in the
+background. A refresh that fails, returns nothing, or returns less than half
+the previous set is discarded and the previous set kept, so a half-failed
+inventory query cannot empty the view. Static `agents:` still work alongside
+discovery and win when a discovered name or URL is already configured. The
+`netbox:` block is applied on reload like the rest of the file: changing it
+restarts discovery, and removing it stops discovery and drops the agents it
+found. NetBox reads are unauthenticated.
 
 ## Querying
 
@@ -97,6 +111,12 @@ cp .env.example .env    # then set BUILD_CA
 
 Everywhere else no certificate is needed and `make` works as-is.
 
+On a network that reaches npm and Go modules only through mirrors, the same
+`.env` carries those too: `NPM_REGISTRY` for the npm mirror, `GOPROXY_URL` for
+the Go module mirror and `DOCKER` for the container tool (`.env.example` has
+the HRT values, including the token exchange `GOPROXY_URL` needs).
+`make image` builds the runnable image and `make push` publishes it.
+
 The build runs in a container: the UI needs a Node toolchain whose version
 matters, and building it there keeps the result independent of whatever is
 installed on the host. BuildKit writes the binaries straight to `bin/`, so no
@@ -109,5 +129,9 @@ iteration on the daemon, not for producing something to ship.
 For a runnable container image rather than binaries:
 
 ```sh
-docker build --target runtime -t vmlookingglass .
+make image    # $(IMAGE):$(VERSION), through the .env mirrors
 ```
+
+On a network with no mirrors to configure, a plain
+`docker build --target runtime -t vmlookingglass .` builds the same runtime
+stage directly.

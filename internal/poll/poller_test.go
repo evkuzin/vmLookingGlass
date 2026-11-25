@@ -169,6 +169,22 @@ func TestPollAgentSuccess(t *testing.T) {
 	}
 }
 
+// A dead agent must fail the connect in seconds rather than hold a pool slot
+// until the per-agent timeout expires.
+func TestNewBoundsDial(t *testing.T) {
+	p := New(discardLogger())
+	tr, ok := p.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport = %T, want *http.Transport", p.client.Transport)
+	}
+	if tr.DialContext == nil {
+		t.Fatal("transport has no DialContext, so the dial is unbounded")
+	}
+	if got := tr.TLSHandshakeTimeout; got != dialTimeout {
+		t.Errorf("TLS handshake timeout = %v, want %v", got, dialTimeout)
+	}
+}
+
 // Dropped targets are needed for debugging relabel rules, so the poller must
 // ask for them rather than only active ones.
 func TestPollRequestsAllStates(t *testing.T) {

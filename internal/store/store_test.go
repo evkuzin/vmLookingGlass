@@ -442,6 +442,7 @@ func TestConcurrentApplyAndRead(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+	s.Flush()
 
 	if len(s.Snapshot().Agents) != 4 {
 		t.Errorf("agents = %d, want 4", len(s.Snapshot().Agents))

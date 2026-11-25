@@ -13,8 +13,29 @@
 listen: :8880
 
 # Defaults for every agent. Both can be overridden per agent below.
+# The timeout covers transfer and decode; the dial itself is bounded at 10s.
 interval: 60s
 timeout: 120s
+
+# Cap on agents polled at once. A missing or zero value means the CPU quota.
+max_concurrency: 16
+
+# Agents can also be discovered from the NetBox inventory. Each tag is queried
+# separately and the results unioned. A device whose name matches exclude, or
+# does not look like a hostname, is dropped; a refresh that returns less than
+# half the previous set is rejected and the previous set kept. A name or URL
+# already covered by a static agent below is skipped, so the static list wins.
+# NetBox reads are unauthenticated.
+netbox:
+  url: https://netbox.hudson-trading.com/api
+  tags: [tradeprom, tradeprom_scraper, victoriametrics_vmagent]
+  exclude: 'test|vmti'
+  interval: 30m
+  # Under the 60s default, so a stuck NetBox is reported sooner rather than
+  # holding the refresh for a full minute.
+  timeout: 45s
+  labels:
+    source: netbox
 
 agents:
   # url accepts a bare host, host:port, or a full URL. A missing port
